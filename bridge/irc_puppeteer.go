@@ -377,61 +377,58 @@ func (m *IRCPuppeteer) generateNickname(discord DiscordUser) string {
 	return newNick
 }
 
+// https://github.com/overdrivenetworks/matterbridge/blob/for-upstream/relaymsg/bridge/irc/irc.go
+// Sanitize nicks for RELAYMSG: replace IRC characters with special meanings with "-"
+func sanitizeNick(nick string) string {
+	sanitize := func(r rune) rune {
+		if strings.ContainsRune("!+%@&#$:'\"?*,. ", r) {
+			return '-'
+		}
+		return r
+	}
+	return strings.Map(sanitize, nick)
+}
+
 // SendMessage sends a broken down Discord Message to a particular IRC channel.
 func (m *IRCPuppeteer) SendMessage(channel string, msg *DiscordMessage) {
 	if m.ircIgnoredDiscord(msg.Author.ID) {
 		return
 	}
 
-	con, ok := m.ircConnections[msg.Author.ID]
-
 	content := msg.Content
 
 	channel = strings.Split(channel, " ")[0]
 
-	// Person is appearing offline (or the bridge is running in Simple Mode)
-	if !ok {
-		length := len(msg.Author.Username)
-		for _, line := range strings.Split(content, "\n") {
-			m.bridge.ircListener.Privmsg(channel, fmt.Sprintf(
+	// TODO don't assume server supports draft/relaymsg
+	supportsRelayMsg := true
+
+	length := len(msg.Author.Username)
+	for _, line := range strings.Split(content, "\n") {
+		// if strings.HasPrefix(line, "/me ") && len(line) > 4 {
+		// 	ircMessage.IsAction = true
+		// 	ircMessage.Message = line[4:]
+		// }
+
+		if supportsRelayMsg {
+			username := sanitizeNick(msg.Author.Username)
+
+			var fmtstr string
+			if msg.IsAction {
+				fmtstr = "RELAYMSG %s %s :\x01ACTION %s\x01"
+			} else {
+				fmtstr = "RELAYMSG %s %s :%s"
+			}
+			m.bridge.ircListener.SendRawf(fmtstr, channel, username, line)
+		} else {
+			line = fmt.Sprintf(
 				"<%s#%s> %s",
+				// TODO(rtk0c) what's the point of using U+200B ZERO WIDTH SPACE?
 				msg.Author.Username[:1]+"\u200B"+msg.Author.Username[1:length],
+				// TODO(rtk0c) discord no longer uses this
 				msg.Author.Discriminator,
 				line,
-			))
-		}
-		return
-	}
-
-	// If there is a cooldown, reset the cooldown
-	if con.cooldownTimer != nil {
-		m.SetConnectionCooldown(con)
-	}
-
-	for _, line := range strings.Split(content, "\n") {
-		ircMessage := IRCMessage{
-			IRCChannel: channel,
-			Message:    line,
-			IsAction:   msg.IsAction,
-		}
-
-		if strings.HasPrefix(line, "/me ") && len(line) > 4 {
-			ircMessage.IsAction = true
-			ircMessage.Message = line[4:]
-		}
-
-		if m.isFilteredDiscordMessage(line) {
-			continue
-		}
-
-		select {
-		// Try to send the message immediately
-		case con.messages <- ircMessage:
-		// If it can't after 5ms, do it in a separate goroutine
-		case <-time.After(time.Millisecond * 5):
-			go func() {
-				con.messages <- ircMessage
-			}()
+			)
+			m.bridge.ircListener.Privmsg(channel, line)
 		}
 	}
 }
