@@ -18,8 +18,8 @@ import (
 // DevMode is a hack
 var DevMode = false
 
-// IRCManager should only be used from one thread.
-type IRCManager struct {
+// IRCPuppeteer should only be used from one thread.
+type IRCPuppeteer struct {
 	ircConnections map[string]*ircConnection
 	puppetNicks    map[string]*ircConnection
 
@@ -27,10 +27,9 @@ type IRCManager struct {
 	varys  varys.Client
 }
 
-// NewIRCManager creates a new IRCManager
-func newIRCManager(bridge *Bridge) (*IRCManager, error) {
+func newIRCPuppeteer(bridge *Bridge) (*IRCPuppeteer, error) {
 	conf := bridge.Config
-	m := &IRCManager{
+	m := &IRCPuppeteer{
 		ircConnections: make(map[string]*ircConnection),
 		puppetNicks:    make(map[string]*ircConnection),
 		bridge:         bridge,
@@ -62,7 +61,7 @@ func newIRCManager(bridge *Bridge) (*IRCManager, error) {
 			discord:          DiscordUser{ID: discord},
 			nick:             nick,
 			messages:         make(chan IRCMessage),
-			manager:          m,
+			puppeteer:        m,
 			pmNoticedSenders: make(map[string]struct{}),
 		}
 	}
@@ -71,7 +70,7 @@ func newIRCManager(bridge *Bridge) (*IRCManager, error) {
 }
 
 // CloseConnection shuts down a particular connection and its channels.
-func (m *IRCManager) CloseConnection(i *ircConnection) {
+func (m *IRCPuppeteer) CloseConnection(i *ircConnection) {
 	log.WithField("nick", i.nick).Println("Closing connection.")
 	// Destroy the cooldown timer
 	if i.cooldownTimer != nil {
@@ -92,8 +91,8 @@ func (m *IRCManager) CloseConnection(i *ircConnection) {
 	}
 }
 
-// Close closes all of an IRCManager's connections.
-func (m *IRCManager) Close() {
+// Close closes all of an IRCPuppeteer's connections.
+func (m *IRCPuppeteer) Close() {
 	i := 0
 	for _, con := range m.ircConnections {
 		m.CloseConnection(con)
@@ -102,7 +101,7 @@ func (m *IRCManager) Close() {
 }
 
 // SetConnectionCooldown renews/starts a timer for expiring a connection.
-func (m *IRCManager) SetConnectionCooldown(con *ircConnection) {
+func (m *IRCPuppeteer) SetConnectionCooldown(con *ircConnection) {
 	if con.cooldownTimer != nil {
 		log.WithField("nick", con.nick).Println("IRC connection cooldownTimer stopped!")
 		con.cooldownTimer.Stop()
@@ -120,7 +119,7 @@ func (m *IRCManager) SetConnectionCooldown(con *ircConnection) {
 }
 
 // DisconnectUser immediately disconnects a Discord user if it exists
-func (m *IRCManager) DisconnectUser(userID string) {
+func (m *IRCPuppeteer) DisconnectUser(userID string) {
 	con, ok := m.ircConnections[userID]
 	if !ok {
 		return
@@ -130,7 +129,7 @@ func (m *IRCManager) DisconnectUser(userID string) {
 
 var connectionsIgnored = 0
 
-func (m *IRCManager) ircIgnoredDiscord(user string) bool {
+func (m *IRCPuppeteer) ircIgnoredDiscord(user string) bool {
 	_, ret := m.bridge.Config.DiscordIgnores[user]
 	return ret
 }
@@ -138,7 +137,7 @@ func (m *IRCManager) ircIgnoredDiscord(user string) bool {
 // HandleUser deals with messages sent from a DiscordUser
 //
 // When `user.Online == false`, we make `user.ID` the only other data present in discord.handlePresenceUpdate
-func (m *IRCManager) HandleUser(user DiscordUser) {
+func (m *IRCPuppeteer) HandleUser(user DiscordUser) {
 	if m.ircIgnoredDiscord(user.ID) {
 		return
 	}
@@ -194,7 +193,7 @@ func (m *IRCManager) HandleUser(user DiscordUser) {
 			"user.Username":      user.Username,
 			"user.Discriminator": user.Discriminator,
 			"user.ID":            user.ID,
-		}).Println("ignoring a HandleUser (in irc_manager.go)")
+		}).Println("ignoring a HandleUser (in irc_puppeteer.go)")
 		return
 	}
 
@@ -237,7 +236,7 @@ func (m *IRCManager) HandleUser(user DiscordUser) {
 		discord:          user,
 		nick:             nick,
 		messages:         make(chan IRCMessage),
-		manager:          m,
+		puppeteer:        m,
 		pmNoticedSenders: make(map[string]struct{}),
 		quitMessage:      fmt.Sprintf("Offline for %s", m.bridge.Config.CooldownDuration),
 	}
@@ -307,7 +306,7 @@ func sanitiseNickname(nick string) string {
 	return string(newNick)
 }
 
-func (m *IRCManager) generateNickname(discord DiscordUser) string {
+func (m *IRCPuppeteer) generateNickname(discord DiscordUser) string {
 	nick := sanitiseNickname(discord.Nick)
 	suffix := m.bridge.Config.Suffix
 	newNick := nick + suffix
@@ -379,7 +378,7 @@ func (m *IRCManager) generateNickname(discord DiscordUser) string {
 }
 
 // SendMessage sends a broken down Discord Message to a particular IRC channel.
-func (m *IRCManager) SendMessage(channel string, msg *DiscordMessage) {
+func (m *IRCPuppeteer) SendMessage(channel string, msg *DiscordMessage) {
 	if m.ircIgnoredDiscord(msg.Author.ID) {
 		return
 	}
@@ -441,11 +440,11 @@ func (m *IRCManager) SendMessage(channel string, msg *DiscordMessage) {
 // and then find pairings in the global pairings list
 // Currently just returns all participating IRC channels
 // TODO (?)
-func (m *IRCManager) RequestChannels(userID string) []Mapping {
+func (m *IRCPuppeteer) RequestChannels(userID string) []Mapping {
 	return m.bridge.mappings
 }
 
-func (m *IRCManager) isIgnoredHostmask(mask string) bool {
+func (m *IRCPuppeteer) isIgnoredHostmask(mask string) bool {
 	for _, ban := range m.bridge.Config.IRCIgnores {
 		if ban.Match(mask) {
 			return true
@@ -454,7 +453,7 @@ func (m *IRCManager) isIgnoredHostmask(mask string) bool {
 	return false
 }
 
-func (m *IRCManager) isFilteredIRCMessage(txt string) bool {
+func (m *IRCPuppeteer) isFilteredIRCMessage(txt string) bool {
 	for _, ban := range m.bridge.Config.IRCFilteredMessages {
 		if ban.Match(txt) {
 			return true
@@ -463,7 +462,7 @@ func (m *IRCManager) isFilteredIRCMessage(txt string) bool {
 	return false
 }
 
-func (m *IRCManager) isFilteredDiscordMessage(txt string) bool {
+func (m *IRCPuppeteer) isFilteredDiscordMessage(txt string) bool {
 	for _, ban := range m.bridge.Config.DiscordFilteredMessages {
 		if ban.Match(txt) {
 			return true
@@ -472,7 +471,7 @@ func (m *IRCManager) isFilteredDiscordMessage(txt string) bool {
 	return false
 }
 
-func (m *IRCManager) generateUsername(discordUser DiscordUser) string {
+func (m *IRCPuppeteer) generateUsername(discordUser DiscordUser) string {
 	if len(m.bridge.Config.PuppetUsername) > 0 {
 		return m.bridge.Config.PuppetUsername
 	}

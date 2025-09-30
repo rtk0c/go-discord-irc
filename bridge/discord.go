@@ -266,7 +266,7 @@ func (d *discordBot) ParseText(m *discordgo.Message) string {
 	for _, user := range m.Mentions {
 		// Find the irc username with the discord ID in irc connections
 		username := ""
-		for _, u := range d.bridge.ircManager.ircConnections {
+		for _, u := range d.bridge.IRCPuppeteer.ircConnections {
 			if u.discord.ID == user.ID {
 				username = u.nick
 			}
@@ -282,7 +282,7 @@ func (d *discordBot) ParseText(m *discordgo.Message) string {
 				nick = member.Nick
 			}
 
-			username = d.bridge.ircManager.generateNickname(DiscordUser{
+			username = d.bridge.IRCPuppeteer.generateNickname(DiscordUser{
 				ID:            user.ID,
 				Username:      user.Username,
 				Discriminator: user.Discriminator,

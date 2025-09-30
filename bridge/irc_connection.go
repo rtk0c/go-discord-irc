@@ -10,8 +10,8 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// An ircConnection should only ever communicate with its manager
-// Refer to `(m *ircManager) CreateConnection` to see how these are spawned
+// An ircConnection should only ever communicate with its puppeteer
+// Refer to `(m *IRCPuppeteer) CreateConnection` to see how these are spawned
 type ircConnection struct {
 	discord DiscordUser
 	nick    string
@@ -21,7 +21,7 @@ type ircConnection struct {
 	messages      chan IRCMessage
 	cooldownTimer *time.Timer
 
-	manager *IRCManager
+	puppeteer *IRCPuppeteer
 
 	// channel ID for their discord channel for PMs
 	pmDiscordChannel string
@@ -32,7 +32,7 @@ type ircConnection struct {
 }
 
 func (i *ircConnection) GetNick() string {
-	nick, err := i.manager.varys.GetNick(i.discord.ID)
+	nick, err := i.puppeteer.varys.GetNick(i.discord.ID)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -40,7 +40,7 @@ func (i *ircConnection) GetNick() string {
 }
 
 func (i *ircConnection) Connected() bool {
-	connected, err := i.manager.varys.Connected(i.discord.ID)
+	connected, err := i.puppeteer.varys.Connected(i.discord.ID)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -49,7 +49,7 @@ func (i *ircConnection) Connected() bool {
 
 func (i *ircConnection) OnWelcome(e *irc.Event) {
 	// execute puppet prejoin commands
-	err := i.manager.varys.SendRaw(i.discord.ID, varys.InterpolationParams{Nick: true}, i.manager.bridge.Config.IRCPuppetPrejoinCommands...)
+	err := i.puppeteer.varys.SendRaw(i.discord.ID, varys.InterpolationParams{Nick: true}, i.puppeteer.bridge.Config.IRCPuppetPrejoinCommands...)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -57,7 +57,7 @@ func (i *ircConnection) OnWelcome(e *irc.Event) {
 	i.JoinChannels()
 
 	// just in case NickServ, Q:Lines, or otherwise force our nick to be not what we expect!
-	i.manager.puppetNicks[i.GetNick()] = i
+	i.puppeteer.puppetNicks[i.GetNick()] = i
 
 	go func(i *ircConnection) {
 		for m := range i.messages {
@@ -71,18 +71,18 @@ func (i *ircConnection) OnWelcome(e *irc.Event) {
 }
 
 func (i *ircConnection) JoinChannels() {
-	i.SendRaw(i.manager.bridge.GetJoinCommand(i.manager.RequestChannels(i.discord.ID)))
+	i.SendRaw(i.puppeteer.bridge.GetJoinCommand(i.puppeteer.RequestChannels(i.discord.ID)))
 }
 
 func (i *ircConnection) UpdateDetails(discord DiscordUser) {
 	if i.discord.Username != discord.Username {
 		i.quitMessage = fmt.Sprintf("Changing real name from %s to %s", i.discord.Username, discord.Username)
-		i.manager.CloseConnection(i)
+		i.puppeteer.CloseConnection(i)
 
 		// After one second make the user reconnect.
 		// This should be enough time for the nick tracker to update.
 		time.AfterFunc(time.Second, func() {
-			i.manager.HandleUser(discord)
+			i.puppeteer.HandleUser(discord)
 		})
 		return
 	}
@@ -93,17 +93,17 @@ func (i *ircConnection) UpdateDetails(discord DiscordUser) {
 	}
 
 	i.discord = discord
-	delete(i.manager.puppetNicks, i.nick)
-	i.nick = i.manager.generateNickname(i.discord)
-	i.manager.puppetNicks[i.nick] = i
+	delete(i.puppeteer.puppetNicks, i.nick)
+	i.nick = i.puppeteer.generateNickname(i.discord)
+	i.puppeteer.puppetNicks[i.nick] = i
 
-	if err := i.manager.varys.Nick(i.discord.ID, i.nick); err != nil {
+	if err := i.puppeteer.varys.Nick(i.discord.ID, i.nick); err != nil {
 		panic(err.Error())
 	}
 }
 
 func (i *ircConnection) introducePM(nick string) {
-	d := i.manager.bridge.discord
+	d := i.puppeteer.bridge.discord
 
 	if i.pmDiscordChannel == "" {
 		c, err := d.Session.UserChannelCreate(i.discord.ID)
@@ -119,7 +119,7 @@ func (i *ircConnection) introducePM(nick string) {
 		i.pmNoticed = true
 		_, err := d.Session.ChannelMessageSend(
 			i.pmDiscordChannel,
-			fmt.Sprintf("To reply type: `%s@%s, your message here`", nick, i.manager.bridge.Config.Discriminator))
+			fmt.Sprintf("To reply type: `%s@%s, your message here`", nick, i.puppeteer.bridge.Config.Discriminator))
 		if err != nil {
 			log.Warnln("Could not send pmNotice", i.discord, err)
 			return
@@ -134,7 +134,7 @@ func (i *ircConnection) introducePM(nick string) {
 
 func (i *ircConnection) OnPrivateMessage(e *irc.Event) {
 	// Ignored hostmasks
-	if i.manager.isIgnoredHostmask(e.Source) {
+	if i.puppeteer.isIgnoredHostmask(e.Source) {
 		return
 	}
 
@@ -146,13 +146,13 @@ func (i *ircConnection) OnPrivateMessage(e *irc.Event) {
 			i.Privmsg(e.Nick, fmt.Sprintf("I am: %s#%s with ID %s", i.discord.Nick, i.discord.Discriminator, i.discord.ID))
 		}
 
-		d := i.manager.bridge.discord
+		d := i.puppeteer.bridge.discord
 
 		i.introducePM(e.Nick)
 
 		msg := fmt.Sprintf(
 			"%s,%s - %s@%s: %s", e.Connection.Server, e.Source,
-			e.Nick, i.manager.bridge.Config.Discriminator, e.Message())
+			e.Nick, i.puppeteer.bridge.Config.Discriminator, e.Message())
 		_, err := d.Session.ChannelMessageSend(i.pmDiscordChannel, msg)
 		if err != nil {
 			log.Warnln("Could not send PM", i.discord, err)
@@ -166,7 +166,7 @@ func (i *ircConnection) OnPrivateMessage(e *irc.Event) {
 }
 
 func (i *ircConnection) SendRaw(message string) {
-	if err := i.manager.varys.SendRaw(i.discord.ID, varys.InterpolationParams{}, message); err != nil {
+	if err := i.puppeteer.varys.SendRaw(i.discord.ID, varys.InterpolationParams{}, message); err != nil {
 		panic(err.Error())
 	}
 }

@@ -52,7 +52,7 @@ type Config struct {
 	// This should be used only for testing.
 	InsecureSkipVerify bool
 
-	// SimpleMode, when enabled, will ensure that IRCManager not spawn
+	// SimpleMode, when enabled, will ensure that IRCPuppeteer not spawn
 	// an IRC connection for each of the online Discord users.
 	SimpleMode bool
 
@@ -76,9 +76,9 @@ type Config struct {
 type Bridge struct {
 	Config *Config
 
-	discord     *discordBot
-	ircListener *ircListener
-	ircManager  *IRCManager
+	discord      *discordBot
+	ircListener  *ircListener
+	IRCPuppeteer *IRCPuppeteer
 
 	mappings       []Mapping
 	ircChannelKeys map[string]string // From "#test" to "password"
@@ -213,13 +213,13 @@ func (b *Bridge) SetChannelMappings(inMappings map[string]string) error {
 		}
 
 		b.ircListener.SendRaw("PART " + strings.Join(rmChannels, ","))
-		if err := b.ircManager.varys.SendRaw("", varys.InterpolationParams{}, "PART "+strings.Join(rmChannels, ",")); err != nil {
+		if err := b.IRCPuppeteer.varys.SendRaw("", varys.InterpolationParams{}, "PART "+strings.Join(rmChannels, ",")); err != nil {
 			panic(err.Error())
 		}
 
 		// The bots needs to join the new mappings
 		b.ircListener.JoinChannels()
-		for _, conn := range b.ircManager.ircConnections {
+		for _, conn := range b.IRCPuppeteer.ircConnections {
 			conn.JoinChannels()
 		}
 	}
@@ -253,8 +253,8 @@ func New(conf *Config) (*Bridge, error) {
 	}
 
 	dib.ircListener = newIRCListener(dib, conf.WebIRCPass)
-	if dib.ircManager, err = newIRCManager(dib); err != nil {
-		return nil, fmt.Errorf("failed to create ircManager: %w", err)
+	if dib.IRCPuppeteer, err = newIRCPuppeteer(dib); err != nil {
+		return nil, fmt.Errorf("failed to create IRCPuppeteer: %w", err)
 	}
 
 	go dib.loop()
@@ -475,21 +475,21 @@ func (b *Bridge) loop() {
 				target = mapping.IRCChannel
 			}
 
-			b.ircManager.SendMessage(target, msg)
+			b.IRCPuppeteer.SendMessage(target, msg)
 
 		// Notification to potentially update, or create, a user
 		// We should not receive anything on this channel if we're in Simple Mode
 		case user := <-b.updateUserChan:
-			b.ircManager.HandleUser(user)
+			b.IRCPuppeteer.HandleUser(user)
 
 		case userID := <-b.removeUserChan:
-			b.ircManager.DisconnectUser(userID)
+			b.IRCPuppeteer.DisconnectUser(userID)
 
 		// Done!
 		case <-b.done:
 			b.discord.Close()
 			b.ircListener.Quit()
-			b.ircManager.Close()
+			b.IRCPuppeteer.Close()
 			close(b.done)
 
 			return
