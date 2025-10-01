@@ -23,6 +23,9 @@ func newIRCListener(dib *Bridge, webIRCPass string) *ircListener {
 	dib.SetupIRCConnection(irccon, "discord.", "fd75:f5f5:226f::")
 	listener.SetDebugMode(dib.Config.Debug)
 
+	// Request relaymsg caps
+	irccon.RequestCaps = append(irccon.RequestCaps, "draft/relaymsg")
+
 	// Nick tracker for nick tracking
 	irccon.SetupNickTrack()
 
@@ -226,6 +229,10 @@ func (i *ircListener) OnPrivateMessage(e *irc.Event) {
 	if string(e.Arguments[0][0]) != "#" {
 		// If you decide to extend this to respond to PMs, make sure
 		// you do not respond to NOTICEs, see issue #50.
+		return
+	}
+
+	if botnick, ok := e.Tags["draft/relaymsg"]; ok && botnick == i.GetNick() {
 		return
 	}
 

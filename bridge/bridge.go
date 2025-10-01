@@ -277,6 +277,8 @@ func (b *Bridge) Open() (err error) {
 		return errors.Wrap(err, "can't open irc connection")
 	}
 
+	b.IRCPuppeteer.setupCaps()
+
 	// run listener loop
 	go b.ircListener.Loop()
 

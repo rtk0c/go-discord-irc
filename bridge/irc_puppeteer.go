@@ -18,6 +18,9 @@ var DevMode = false
 // IRCPuppeteer should only be used from one thread.
 type IRCPuppeteer struct {
 	bridge *Bridge
+
+	// String to append to Discord username when becoming a puppet.
+	usernameDecoration string
 }
 
 func newIRCPuppeteer(bridge *Bridge) (*IRCPuppeteer, error) {
@@ -25,6 +28,42 @@ func newIRCPuppeteer(bridge *Bridge) (*IRCPuppeteer, error) {
 		bridge: bridge,
 	}
 	return m, nil
+}
+
+func firstRune(s string) rune {
+	for _, c := range s {
+		return c
+	}
+	return rune(0)
+}
+
+// Setup puppeteer options, drawing the negotiated IRC capabilities.
+func (m *IRCPuppeteer) setupCaps() {
+	// draft/relaymsg wording:
+	// > If this capability has a value, the given characters are 'nickname separators'.
+	// > These characters aren't allowed in normal nicknames, and if given one MUST be
+	// > present in spoofed nicknames. For example, with `draft/relaymsg=/` the spoofed
+	// > nickname MUST include the character `"/"`.
+	i := m.bridge.ircListener
+	for _, cap := range i.AcknowledgedCaps {
+		if cap.Name == "draft/relaymsg" {
+			reservedChars := cap.Value
+
+			separator := firstRune(reservedChars)
+			if separator == rune(0) {
+				// If server didn't provide a reserved chars, add a courtesy [d] suffix
+				m.usernameDecoration = "[d]"
+			} else {
+				// If server providede.g. / and decorate as /d
+				m.usernameDecoration = string(separator) + "d"
+			}
+			break
+		}
+	}
+}
+
+func (m *IRCPuppeteer) IsUsingRelayMsg() bool {
+	return m.usernameDecoration != ""
 }
 
 // Close closes all of an IRCPuppeteer's connections.
@@ -155,8 +194,7 @@ func (m *IRCPuppeteer) SendMessage(channel string, msg *DiscordMessage) {
 
 	channel = strings.Split(channel, " ")[0]
 
-	// TODO don't assume server supports draft/relaymsg
-	supportsRelayMsg := true
+	useRelayMsg := m.IsUsingRelayMsg()
 
 	length := len(msg.Author.Username)
 	for _, line := range strings.Split(content, "\n") {
@@ -165,7 +203,7 @@ func (m *IRCPuppeteer) SendMessage(channel string, msg *DiscordMessage) {
 		// 	ircMessage.Message = line[4:]
 		// }
 
-		if supportsRelayMsg {
+		if useRelayMsg {
 			username := sanitiseNickname(msg.Author.Username)
 
 			var fmtstr string
