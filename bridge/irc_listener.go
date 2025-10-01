@@ -51,12 +51,7 @@ func newIRCListener(dib *Bridge, webIRCPass string) *ircListener {
 }
 
 func (i *ircListener) nickTrackNick(event *irc.Event) {
-	oldNick := event.Nick
-	newNick := event.Message()
-	if con, ok := i.bridge.IRCPuppeteer.puppetNicks[oldNick]; ok {
-		i.bridge.IRCPuppeteer.puppetNicks[newNick] = con
-		delete(i.bridge.IRCPuppeteer.puppetNicks, oldNick)
-	}
+	// TODO(rtk0c): delete func?
 }
 
 func (i *ircListener) OnNickRelayToDiscord(event *irc.Event) {
@@ -87,13 +82,7 @@ func (i *ircListener) OnNickRelayToDiscord(event *irc.Event) {
 }
 
 func (i *ircListener) nickTrackPuppetQuit(e *irc.Event) {
-	// Protect against HostServ changing nicks or ircd's with CHGHOST/CHGIDENT or similar
-	// sending us a QUIT for a puppet nick only for it to rejoin right after.
-	// The puppet nick won't see a true disconnection itself and thus will still see itself
-	// as connected.
-	if con, ok := i.bridge.IRCPuppeteer.puppetNicks[e.Nick]; ok && !con.Connected() {
-		delete(i.bridge.IRCPuppeteer.puppetNicks, e.Nick)
-	}
+	// TODO(rtk0c): delete func?
 }
 
 func (i *ircListener) OnJoinQuitSettingChange() {
@@ -228,9 +217,7 @@ func (i *ircListener) isPuppetNick(nick string) bool {
 	if i.GetNick() == nick {
 		return true
 	}
-	if _, ok := i.bridge.IRCPuppeteer.puppetNicks[nick]; ok {
-		return true
-	}
+	// TODO check for draft/relaymsg reserved char format
 	return false
 }
 
@@ -248,11 +235,8 @@ func (i *ircListener) OnPrivateMessage(e *irc.Event) {
 		return
 	}
 
+	// TODO(rtk0c): transform IRC nick to discord username
 	replacements := []string{}
-	for _, con := range i.bridge.IRCPuppeteer.ircConnections {
-		replacements = append(replacements, con.nick, "<@!"+con.discord.ID+">")
-	}
-
 	msg := strings.NewReplacer(
 		replacements...,
 	).Replace(e.Message())

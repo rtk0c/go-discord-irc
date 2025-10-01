@@ -10,7 +10,6 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/gobwas/glob"
 	"github.com/pkg/errors"
-	"github.com/qaisjp/go-discord-irc/irc/varys"
 	irc "github.com/qaisjp/go-ircevent"
 	log "github.com/sirupsen/logrus"
 )
@@ -51,10 +50,6 @@ type Config struct {
 	// In this mode, TLS is susceptible to man-in-the-middle attacks.
 	// This should be used only for testing.
 	InsecureSkipVerify bool
-
-	// SimpleMode, when enabled, will ensure that IRCPuppeteer not spawn
-	// an IRC connection for each of the online Discord users.
-	SimpleMode bool
 
 	Suffix    string // Suffix is the suffix to append to IRC puppets
 	Separator string // Separator is used in IRC puppets' username, in fallback situations, between the discriminator and username.
@@ -213,15 +208,9 @@ func (b *Bridge) SetChannelMappings(inMappings map[string]string) error {
 		}
 
 		b.ircListener.SendRaw("PART " + strings.Join(rmChannels, ","))
-		if err := b.IRCPuppeteer.varys.SendRaw("", varys.InterpolationParams{}, "PART "+strings.Join(rmChannels, ",")); err != nil {
-			panic(err.Error())
-		}
 
 		// The bots needs to join the new mappings
 		b.ircListener.JoinChannels()
-		for _, conn := range b.IRCPuppeteer.ircConnections {
-			conn.JoinChannels()
-		}
 	}
 
 	return nil
@@ -479,11 +468,11 @@ func (b *Bridge) loop() {
 
 		// Notification to potentially update, or create, a user
 		// We should not receive anything on this channel if we're in Simple Mode
-		case user := <-b.updateUserChan:
-			b.IRCPuppeteer.HandleUser(user)
+		// case user := <-b.updateUserChan:
+		// 	b.IRCPuppeteer.HandleUser(user)
 
-		case userID := <-b.removeUserChan:
-			b.IRCPuppeteer.DisconnectUser(userID)
+		// case userID := <-b.removeUserChan:
+		// 	b.IRCPuppeteer.DisconnectUser(userID)
 
 		// Done!
 		case <-b.done:

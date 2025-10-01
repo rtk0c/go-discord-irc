@@ -4,14 +4,11 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/mozillazg/go-unidecode"
 	"github.com/pkg/errors"
 
 	ircnick "github.com/qaisjp/go-discord-irc/irc/nick"
-	"github.com/qaisjp/go-discord-irc/irc/varys"
-	irc "github.com/qaisjp/go-ircevent"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -20,252 +17,23 @@ var DevMode = false
 
 // IRCPuppeteer should only be used from one thread.
 type IRCPuppeteer struct {
-	ircConnections map[string]*ircConnection
-	puppetNicks    map[string]*ircConnection
-
 	bridge *Bridge
-	varys  varys.Client
 }
 
 func newIRCPuppeteer(bridge *Bridge) (*IRCPuppeteer, error) {
-	conf := bridge.Config
 	m := &IRCPuppeteer{
-		ircConnections: make(map[string]*ircConnection),
-		puppetNicks:    make(map[string]*ircConnection),
-		bridge:         bridge,
+		bridge: bridge,
 	}
-
-	// Set up varys
-	m.varys = varys.NewMemClient()
-	err := m.varys.Setup(varys.SetupParams{
-		UseTLS:             !conf.NoTLS,
-		InsecureSkipVerify: conf.InsecureSkipVerify,
-
-		Server:         conf.IRCServer,
-		ServerPassword: conf.IRCServerPass,
-		WebIRCPassword: conf.WebIRCPass,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to set up params: %w", err)
-	}
-
-	// Sync back state, if there is any
-	discordToNicks, err := m.varys.GetUIDToNicks()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get discordToNicks: %w", err)
-	}
-	m.ircConnections = make(map[string]*ircConnection, len(discordToNicks))
-	m.puppetNicks = make(map[string]*ircConnection, len(discordToNicks))
-	for discord, nick := range discordToNicks {
-		m.ircConnections[discord] = &ircConnection{
-			discord:          DiscordUser{ID: discord},
-			nick:             nick,
-			messages:         make(chan IRCMessage),
-			puppeteer:        m,
-			pmNoticedSenders: make(map[string]struct{}),
-		}
-	}
-
 	return m, nil
-}
-
-// CloseConnection shuts down a particular connection and its channels.
-func (m *IRCPuppeteer) CloseConnection(i *ircConnection) {
-	log.WithField("nick", i.nick).Println("Closing connection.")
-	// Destroy the cooldown timer
-	if i.cooldownTimer != nil {
-		i.cooldownTimer.Stop()
-		i.cooldownTimer = nil
-	}
-
-	delete(m.ircConnections, i.discord.ID)
-	delete(m.puppetNicks, i.nick)
-	close(i.messages)
-
-	if DevMode {
-		fmt.Println("Decrementing total connections. It's now", len(m.ircConnections))
-	}
-
-	if err := m.varys.QuitIfConnected(i.discord.ID, i.quitMessage); err != nil {
-		log.WithError(err).WithFields(log.Fields{"discord": i.discord.ID}).Errorln("failed to quit")
-	}
 }
 
 // Close closes all of an IRCPuppeteer's connections.
 func (m *IRCPuppeteer) Close() {
-	i := 0
-	for _, con := range m.ircConnections {
-		m.CloseConnection(con)
-		i++
-	}
 }
-
-// SetConnectionCooldown renews/starts a timer for expiring a connection.
-func (m *IRCPuppeteer) SetConnectionCooldown(con *ircConnection) {
-	if con.cooldownTimer != nil {
-		log.WithField("nick", con.nick).Println("IRC connection cooldownTimer stopped!")
-		con.cooldownTimer.Stop()
-	}
-
-	con.cooldownTimer = time.AfterFunc(
-		m.bridge.Config.CooldownDuration,
-		func() {
-			log.WithField("nick", con.nick).Println("IRC connection expired by cooldownTimer...")
-			m.CloseConnection(con)
-		},
-	)
-
-	log.WithField("nick", con.nick).Println("IRC connection cooldownTimer created...")
-}
-
-// DisconnectUser immediately disconnects a Discord user if it exists
-func (m *IRCPuppeteer) DisconnectUser(userID string) {
-	con, ok := m.ircConnections[userID]
-	if !ok {
-		return
-	}
-	m.CloseConnection(con)
-}
-
-var connectionsIgnored = 0
 
 func (m *IRCPuppeteer) ircIgnoredDiscord(user string) bool {
 	_, ret := m.bridge.Config.DiscordIgnores[user]
 	return ret
-}
-
-// HandleUser deals with messages sent from a DiscordUser
-//
-// When `user.Online == false`, we make `user.ID` the only other data present in discord.handlePresenceUpdate
-func (m *IRCPuppeteer) HandleUser(user DiscordUser) {
-	if m.ircIgnoredDiscord(user.ID) {
-		return
-	}
-
-	// If we have an allowed list of users at all
-	if allowed := m.bridge.Config.DiscordAllowed; allowed != nil {
-		// Short-circuit if they aren't in the list
-		if _, ok := allowed[user.ID]; !ok {
-			return
-		}
-	}
-
-	// Does the user exist on the IRC side?
-	if con, ok := m.ircConnections[user.ID]; ok {
-		// Close the connection if they are not
-		// online on Discord anymore (after cooldown)
-		if !user.Online {
-			m.SetConnectionCooldown(con)
-			con.SetAway("offline on discord")
-		} else {
-			// The user is online, destroy any connection cooldown.
-			if con.cooldownTimer != nil {
-				log.WithField("nick", user.Nick).Println("Destroying connection cooldown.")
-				con.cooldownTimer.Stop()
-				con.cooldownTimer = nil
-
-				con.SetAway("")
-			}
-		}
-
-		// If user.Nick is empty then we probably just had a status change
-		if user.Nick == "" {
-			return
-		}
-
-		// Update their nickname / username
-		// Note: this event is still called when their status is changed
-		//       from `online` to `dnd` (online related states)
-		//       In UpdateDetails we handle nickname changes so it is
-		//       OK to call the below potentially redundant function
-		con.UpdateDetails(user)
-		return
-	}
-
-	if user.Username == "" || user.Discriminator == "" {
-		// If they are not online, we don't care, because this was likely an offline event
-		if !user.Online {
-			return
-		}
-
-		log.WithFields(log.Fields{
-			"err":                errors.WithStack(errors.New("Username or Discriminator is empty")).Error(),
-			"user.Username":      user.Username,
-			"user.Discriminator": user.Discriminator,
-			"user.ID":            user.ID,
-		}).Println("ignoring a HandleUser (in irc_puppeteer.go)")
-		return
-	}
-
-	// DEV MODE: Only create a connection if it sounds like qaisjp or if we have 10 connections
-	if DevMode {
-		if len(m.ircConnections) > 4 && !strings.Contains(user.Username, "qais") {
-			connectionsIgnored++
-			// fmt.Println("Not letting", user.Username, "connect. We have", len(m.ircConnections), "connections. Ignored", connectionsIgnored, "connections.")
-			return
-		}
-	}
-
-	// Don't connect them if we're over our configured connection limit! (Includes our listener)
-	if m.bridge.Config.ConnectionLimit > 0 && len(m.ircConnections)+1 >= m.bridge.Config.ConnectionLimit {
-		return
-	}
-
-	nick := m.generateNickname(user)
-	username := m.generateUsername(user)
-
-	var ip string
-	{
-		baseip := "fd75:f5f5:226f:"
-		if user.Bot {
-			baseip += "2"
-		} else {
-			baseip += "1"
-		}
-		ip = SnowflakeToIP(baseip, user.ID)
-	}
-
-	hostname := user.ID
-	if user.Bot {
-		hostname += ".bot.discord"
-	} else {
-		hostname += ".user.discord"
-	}
-
-	con := &ircConnection{
-		discord:          user,
-		nick:             nick,
-		messages:         make(chan IRCMessage),
-		puppeteer:        m,
-		pmNoticedSenders: make(map[string]struct{}),
-		quitMessage:      fmt.Sprintf("Offline for %s", m.bridge.Config.CooldownDuration),
-	}
-
-	m.ircConnections[user.ID] = con
-	m.puppetNicks[nick] = con
-
-	if DevMode {
-		fmt.Println("Incrementing total connections. It's now", len(m.ircConnections))
-	}
-
-	err := m.varys.Connect(varys.ConnectParams{
-		UID: user.ID,
-
-		Nick:     nick,
-		Username: username,
-		RealName: user.Username,
-
-		WebIRCSuffix: fmt.Sprintf("discord %s %s", hostname, ip),
-
-		Callbacks: map[string]func(*irc.Event){
-			"001":     con.OnWelcome,
-			"PRIVMSG": con.OnPrivateMessage,
-		},
-	})
-	if err != nil {
-		log.WithError(err).Errorln("error opening irc connection")
-		return
-	}
 }
 
 // Converts a nickname to a sanitised form.
@@ -377,18 +145,6 @@ func (m *IRCPuppeteer) generateNickname(discord DiscordUser) string {
 	return newNick
 }
 
-// https://github.com/overdrivenetworks/matterbridge/blob/for-upstream/relaymsg/bridge/irc/irc.go
-// Sanitize nicks for RELAYMSG: replace IRC characters with special meanings with "-"
-func sanitizeNick(nick string) string {
-	sanitize := func(r rune) rune {
-		if strings.ContainsRune("!+%@&#$:'\"?*,. ", r) {
-			return '-'
-		}
-		return r
-	}
-	return strings.Map(sanitize, nick)
-}
-
 // SendMessage sends a broken down Discord Message to a particular IRC channel.
 func (m *IRCPuppeteer) SendMessage(channel string, msg *DiscordMessage) {
 	if m.ircIgnoredDiscord(msg.Author.ID) {
@@ -410,7 +166,7 @@ func (m *IRCPuppeteer) SendMessage(channel string, msg *DiscordMessage) {
 		// }
 
 		if supportsRelayMsg {
-			username := sanitizeNick(msg.Author.Username)
+			username := sanitiseNickname(msg.Author.Username)
 
 			var fmtstr string
 			if msg.IsAction {

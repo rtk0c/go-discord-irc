@@ -47,16 +47,6 @@ func newDiscord(bridge *Bridge, botToken, guildID string) (*discordBot, error) {
 	discord.Session.AddHandler(discord.onMessageUpdate)
 	discord.Session.AddHandler(discord.onGuildEmojiUpdate)
 
-	if !bridge.Config.SimpleMode {
-		discord.Session.AddHandler(discord.onMemberListChunk)
-		discord.Session.AddHandler(discord.onMemberUpdate)
-		discord.Session.AddHandler(discord.onMemberLeave)
-		discord.Session.AddHandler(discord.OnPresencesReplace)
-		discord.Session.AddHandler(discord.OnPresenceUpdate)
-		discord.Session.AddHandler(discord.OnTypingStart)
-		discord.Session.AddHandler(discord.OnMessageReactionAdd)
-	}
-
 	return discord, nil
 }
 
@@ -264,45 +254,23 @@ func (d *discordBot) ParseText(m *discordgo.Message) string {
 	content := m.Content
 
 	for _, user := range m.Mentions {
-		// Find the irc username with the discord ID in irc connections
-		username := ""
-		for _, u := range d.bridge.IRCPuppeteer.ircConnections {
-			if u.discord.ID == user.ID {
-				username = u.nick
-			}
+		// Nickname is their username by default
+		nick := user.Username
+
+		// If we can get their member + nick, set nick to the real nick
+		member, err := d.Session.State.Member(d.guildID, user.ID)
+		if err == nil && member.Nick != "" {
+			nick = member.Nick
 		}
 
-		if username == "" {
-			// Nickname is their username by default
-			nick := user.Username
-
-			// If we can get their member + nick, set nick to the real nick
-			member, err := d.Session.State.Member(d.guildID, user.ID)
-			if err == nil && member.Nick != "" {
-				nick = member.Nick
-			}
-
-			username = d.bridge.IRCPuppeteer.generateNickname(DiscordUser{
-				ID:            user.ID,
-				Username:      user.Username,
-				Discriminator: user.Discriminator,
-				Nick:          nick,
-				Bot:           user.Bot,
-				Online:        false,
-			})
-
-			log.WithFields(log.Fields{
-				"discord-username": user.Username,
-				"irc-username":     username,
-				"discord-id":       user.ID,
-			}).Infoln("Could not convert mention using existing IRC connection")
-		} else {
-			log.WithFields(log.Fields{
-				"discord-username": user.Username,
-				"irc-username":     username,
-				"discord-id":       user.ID,
-			}).Infoln("Converted mention using existing IRC connection")
-		}
+		username := d.bridge.IRCPuppeteer.generateNickname(DiscordUser{
+			ID:            user.ID,
+			Username:      user.Username,
+			Discriminator: user.Discriminator,
+			Nick:          nick,
+			Bot:           user.Bot,
+			Online:        false,
+		})
 
 		content = strings.NewReplacer(
 			"<@"+user.ID+">", username,

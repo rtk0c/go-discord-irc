@@ -21,7 +21,6 @@ import (
 
 func main() {
 	config := flag.String("config", "", "Config file to read configuration stuff from")
-	simple := flag.Bool("simple", false, "When in simple mode, the bridge will only spawn one IRC connection for listening and speaking")
 	debugMode := flag.Bool("debug", false, "Debug mode? (false = use value from settings)")
 	notls := flag.Bool("no-tls", false, "Avoids using TLS att all when connecting to IRC server ")
 	insecure := flag.Bool("insecure", false, "Skip TLS certificate verification? (INSECURE MODE) (false = use value from settings)")
@@ -36,10 +35,6 @@ func main() {
 	if *config == "" {
 		log.Fatalln("--config argument is required!")
 		return
-	}
-
-	if *simple {
-		log.Println("Running in simple mode.")
 	}
 
 	viper := viper.New()
@@ -167,7 +162,6 @@ func main() {
 		InsecureSkipVerify:         *insecure,
 		Suffix:                     suffix,
 		Separator:                  separator,
-		SimpleMode:                 *simple,
 		ChannelMappings:            channelMappings,
 		CooldownDuration:           time.Second * time.Duration(cooldownDuration),
 		ShowJoinQuit:               showJoinQuit,
