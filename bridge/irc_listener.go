@@ -24,7 +24,7 @@ func newIRCListener(dib *Bridge, webIRCPass string) *ircListener {
 	listener.SetDebugMode(dib.Config.Debug)
 
 	// Request relaymsg caps
-	irccon.RequestCaps = append(irccon.RequestCaps, "draft/relaymsg")
+	irccon.RequestCaps["draft/relaymsg"] = true
 
 	// Nick tracker for nick tracking
 	irccon.SetupNickTrack()

@@ -45,9 +45,9 @@ func (m *IRCPuppeteer) setupCaps() {
 	// > present in spoofed nicknames. For example, with `draft/relaymsg=/` the spoofed
 	// > nickname MUST include the character `"/"`.
 	i := m.bridge.ircListener
-	for _, cap := range i.AcknowledgedCaps {
-		if cap.Name == "draft/relaymsg" {
-			reservedChars := cap.Value
+	for _, capName := range i.AcknowledgedCaps {
+		if capName == "draft/relaymsg" {
+			reservedChars := i.AvailableCaps[capName]
 
 			separator := firstRune(reservedChars)
 			if separator == rune(0) {
