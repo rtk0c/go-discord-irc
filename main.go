@@ -15,10 +15,8 @@ func main() {
 	configPath := flag.String("config", "", "Config file to read configuration stuff from")
 	debugMode := flag.Bool("debug", false, "Debug mode?")
 	debugPresence := flag.Bool("debug-presence", false, "Include presence in debug output")
-	devMode := flag.Bool("dev", false, "")
 
 	flag.Parse()
-	bridge.DevMode = *devMode
 
 	if *configPath == "" {
 		log.Fatalln("--config argument is required!")

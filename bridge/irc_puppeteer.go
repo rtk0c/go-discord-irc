@@ -12,9 +12,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// DevMode is a hack
-var DevMode = false
-
 // IRCPuppeteer should only be used from one thread.
 type IRCPuppeteer struct {
 	bridge *Bridge
