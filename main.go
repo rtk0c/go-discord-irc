@@ -11,6 +11,12 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+func transfer[T any](target *T, src *T) {
+	if src != nil {
+		*target = *src
+	}
+}
+
 func main() {
 	configPath := flag.String("config", "", "Config file to read configuration stuff from")
 	debugMode := flag.Bool("debug", false, "Debug mode?")
@@ -31,11 +37,12 @@ func main() {
 	SetLogDebug(*debugMode)
 
 	dibConfig := bridge.MakeDefaultConfig()
-	dibConfig.DebugPresence = *debugPresence // Default value, if unspecified in the config
 	err = bridge.LoadConfigInto(dibConfig, configFile)
 	if err != nil {
 		log.Fatalln(errors.Wrap(err, "could not read config"))
 	}
+	transfer(&dibConfig.Debug, debugMode)
+	transfer(&dibConfig.DebugPresence, debugPresence)
 
 	dib, err := bridge.New(dibConfig)
 	if err != nil {
