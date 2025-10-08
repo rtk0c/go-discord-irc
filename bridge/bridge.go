@@ -2,7 +2,9 @@ package bridge
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
 	"time"
@@ -10,35 +12,78 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/gobwas/glob"
 	"github.com/pkg/errors"
+	ircnick "github.com/qaisjp/go-discord-irc/irc/nick"
 	irc "github.com/qaisjp/go-ircevent"
 	log "github.com/sirupsen/logrus"
 )
 
+type JsonSet map[string]struct{}
+
+func (s *JsonSet) UnmarshalJSON(data []byte) error {
+	var list []string
+	err := json.Unmarshal(data, &list)
+	if err != nil {
+		return err
+	}
+
+	*s = make(map[string]struct{}, len(list))
+	for _, v := range list {
+		(*s)[v] = struct{}{}
+	}
+	return nil
+}
+
+// [glob.Glob] is an interface, so we have to emulate its exposed surface area here
+type JsonGlob struct {
+	g glob.Glob
+}
+
+func (g JsonGlob) Match(s string) bool {
+	return g.g.Match(s)
+}
+
+func (s JsonGlob) UnmarshalJSON(data []byte) error {
+	var text string
+	err := json.Unmarshal(data, &text)
+	if err != nil {
+		return err
+	}
+
+	filter, err := glob.Compile(text)
+	if err != nil {
+		return err
+	}
+
+	s.g = filter
+	return nil
+}
+
 // Config to be passed to New
 type Config struct {
-	AvatarURL                string
-	DiscordBotToken, GuildID string
+	AvatarURL       string
+	DiscordBotToken string
+	GuildID         string // Guild to/from which to bridge messages
 
 	// Map from Discord to IRC
 	ChannelMappings map[string]string
 
-	IRCServer       string
-	Discriminator   string
-	IRCServerPass   string
+	IRCServer       string // Server address to use, example `irc.freenode.net:7000`.
+	Discriminator   string // unique per IRC network connected to, keeps PMs working
+	IRCServerPass   string // Optional password for connecting to the IRC server
 	IRCListenerName string // i.e, "DiscordBot", required to listen for messages in all cases
 	WebIRCPass      string
 	PuppetUsername  string // Username to connect to IRC with
-	IRCIgnores      []glob.Glob
-	DiscordIgnores  map[string]struct{} // Discord user IDs to not bridge
-	DiscordAllowed  map[string]struct{} // Discord user IDs to only bridge
-	ConnectionLimit int                 // number of IRC connections we can spawn
+	ConnectionLimit int    // Number of IRC connections we can spawn
 
-	IRCPuppetPrejoinCommands   []string
+	IRCPuppetPrejoinCommands   []string // Commands for each connection to send before joining channels
 	IRCListenerPrejoinCommands []string
 
-	// filters
-	IRCFilteredMessages     []glob.Glob
-	DiscordFilteredMessages []glob.Glob
+	IRCIgnores     []JsonGlob // Ignore users with matching hostname
+	DiscordIgnores JsonSet    // Discord user IDs to not bridge
+	DiscordAllowed JsonSet    // Discord user IDs to only bridge
+
+	IRCFilteredMessages     []JsonGlob // Ignore lines containing matched text from IRC
+	DiscordFilteredMessages []JsonGlob // Ignore lines containing matched text from Discord
 
 	// NoTLS constrols whether to use TLS at all when connecting to the IRC server
 	NoTLS bool
@@ -65,6 +110,38 @@ type Config struct {
 
 	Debug         bool
 	DebugPresence bool
+}
+
+func MakeDefaultConfig() *Config {
+	return &Config{
+		IRCPuppetPrejoinCommands: []string{"MODE ${NICK} +D"},
+		AvatarURL:                "https://robohash.org/${USERNAME}.png?set=set4",
+		IRCListenerName:          "~d",
+		PuppetUsername:           "",
+		Suffix:                   "~d",
+		Separator:                "~",
+		CooldownDuration:         time.Hour * 24,
+		ShowJoinQuit:             false,
+		MaxNickLength:            ircnick.MAXLENGTH,
+	}
+}
+
+func LoadConfigInto(config *Config, r io.Reader) error {
+	json.NewDecoder(r).Decode(&config)
+
+	if config.Discriminator == "" {
+		return errors.New("'irc_server_name' config option is required and cannot be empty")
+	}
+
+	if config.WebIRCPass == "" {
+		log.Warnln("webirc_pass is empty")
+	}
+
+	if len(config.ChannelMappings) == 0 {
+		log.Warnln("Channel mappings are missing!")
+	}
+
+	return nil
 }
 
 // A Bridge represents a bridging between an IRC server and channels in a Discord server
@@ -210,7 +287,11 @@ func (b *Bridge) SetChannelMappings(inMappings map[string]string) error {
 		b.ircListener.SendRaw("PART " + strings.Join(rmChannels, ","))
 
 		// The bots needs to join the new mappings
-		b.ircListener.JoinChannels()
+		joinChannels := []string{}
+		for _, mapping := range newMappings {
+			joinChannels = append(joinChannels, mapping.IRCChannel)
+		}
+		b.ircListener.SendRaw("JOIN " + strings.Join(joinChannels, ","))
 	}
 
 	return nil
