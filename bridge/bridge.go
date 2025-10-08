@@ -68,12 +68,13 @@ type Config struct {
 	ChannelMappings map[string]string
 
 	IRCServer       string // Server address to use, example `irc.freenode.net:7000`.
-	Discriminator   string // unique per IRC network connected to, keeps PMs working
 	IRCServerPass   string // Optional password for connecting to the IRC server
-	IRCListenerName string // i.e, "DiscordBot", required to listen for messages in all cases
+	IRCBotNick      string // i.e, "DiscordBot", required to listen for messages in all cases
 	WebIRCPass      string
-	PuppetUsername  string // Username to connect to IRC with
-	ConnectionLimit int    // Number of IRC connections we can spawn
+	ConnectionLimit int // Number of IRC connections we can spawn
+
+	// TODO get rid of this
+	Discriminator string // unique per IRC network connected to, keeps PMs working
 
 	IRCPuppetPrejoinCommands   []string // Commands for each connection to send before joining channels
 	IRCListenerPrejoinCommands []string
@@ -116,8 +117,7 @@ func MakeDefaultConfig() *Config {
 	return &Config{
 		IRCPuppetPrejoinCommands: []string{"MODE ${NICK} +D"},
 		AvatarURL:                "https://robohash.org/${USERNAME}.png?set=set4",
-		IRCListenerName:          "~d",
-		PuppetUsername:           "",
+		IRCBotNick:               "~d",
 		Suffix:                   "~d",
 		Separator:                "~",
 		CooldownDuration:         time.Hour * 24,
@@ -127,10 +127,13 @@ func MakeDefaultConfig() *Config {
 }
 
 func LoadConfigInto(config *Config, r io.Reader) error {
-	json.NewDecoder(r).Decode(&config)
+	err := json.NewDecoder(r).Decode(&config)
+	if err != nil {
+		return err
+	}
 
 	if config.Discriminator == "" {
-		return errors.New("'irc_server_name' config option is required and cannot be empty")
+		return errors.New("'Discriminator' config option is required and cannot be empty")
 	}
 
 	if config.WebIRCPass == "" {
@@ -327,21 +330,11 @@ func New(conf *Config) (*Bridge, error) {
 		return nil, fmt.Errorf("failed to create IRCPuppeteer: %w", err)
 	}
 
+	dib.ircListener.SetDebugMode(conf.Debug)
+
 	go dib.loop()
 
 	return dib, nil
-}
-
-// SetIRCListenerName changes the username of the listener bot.
-func (b *Bridge) SetIRCListenerName(name string) {
-	b.Config.IRCListenerName = name
-	b.ircListener.Nick(name)
-}
-
-// SetDebugMode allows you to control debug logging.
-func (b *Bridge) SetDebugMode(debug bool) {
-	b.Config.Debug = debug
-	b.ircListener.SetDebugMode(debug)
 }
 
 // Open all the connections required to run the bridge

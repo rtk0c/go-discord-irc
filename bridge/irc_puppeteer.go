@@ -258,10 +258,3 @@ func (m *IRCPuppeteer) isFilteredDiscordMessage(txt string) bool {
 	}
 	return false
 }
-
-func (m *IRCPuppeteer) generateUsername(discordUser DiscordUser) string {
-	if len(m.bridge.Config.PuppetUsername) > 0 {
-		return m.bridge.Config.PuppetUsername
-	}
-	return sanitiseNickname(discordUser.Username)
-}

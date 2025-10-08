@@ -17,7 +17,7 @@ type ircListener struct {
 }
 
 func newIRCListener(dib *Bridge, webIRCPass string) *ircListener {
-	irccon := irc.IRC(dib.Config.IRCListenerName, "discord")
+	irccon := irc.IRC(dib.Config.IRCBotNick, "discord")
 	listener := &ircListener{irccon, dib, make(map[string]int)}
 
 	dib.SetupIRCConnection(irccon, "discord.", "fd75:f5f5:226f::")
@@ -194,8 +194,8 @@ func (i *ircListener) DoesUserExist(user string) bool {
 }
 
 func (i *ircListener) SetDebugMode(debug bool) {
-	// i.VerboseCallbackHandler = debug
-	// i.Debug = debug
+	i.VerboseCallbackHandler = debug
+	i.Debug = debug
 }
 
 func (i *ircListener) OnWelcome(e *irc.Event) {
