@@ -202,6 +202,7 @@ func (m *IRCPuppeteer) SendMessage(channel string, msg *DiscordMessage) {
 
 		if useRelayMsg {
 			username := sanitiseNickname(msg.Author.Username)
+			username += m.usernameDecoration
 
 			var fmtstr string
 			if msg.IsAction {

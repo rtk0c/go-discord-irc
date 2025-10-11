@@ -232,9 +232,13 @@ func (i *ircListener) OnPrivateMessage(e *irc.Event) {
 		return
 	}
 
-	if botnick, ok := e.Tags["draft/relaymsg"]; ok && botnick == i.GetNick() {
+	if strings.HasSuffix(e.Nick, i.bridge.IRCPuppeteer.usernameDecoration) {
 		return
 	}
+	// TODO fix tags parsing
+	// if botnick, ok := e.Tags["draft/relaymsg"]; ok && botnick == i.GetNick() {
+	// 	return
+	// }
 
 	if i.isPuppetNick(e.Nick) || // ignore msg's from our puppets
 		i.bridge.IRCPuppeteer.isIgnoredHostmask(e.Source) || //ignored hostmasks
