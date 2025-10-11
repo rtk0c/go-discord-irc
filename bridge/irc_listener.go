@@ -16,7 +16,7 @@ type ircListener struct {
 	listenerCallbackIDs map[string]int
 }
 
-func newIRCListener(dib *Bridge, webIRCPass string) *ircListener {
+func newIRCListener(dib *Bridge) *ircListener {
 	irccon := irc.IRC(dib.Config.IRCBotNick, "discord")
 	listener := &ircListener{irccon, dib, make(map[string]int)}
 

@@ -50,8 +50,6 @@ func main() {
 		return
 	}
 
-	log.Infoln("Cooldown duration for IRC puppets is", dib.Config.CooldownDuration)
-
 	// Create new signal receiver
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)

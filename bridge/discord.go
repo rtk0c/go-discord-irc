@@ -8,7 +8,6 @@ import (
 
 	"github.com/42wim/matterbridge/bridge/discord/transmitter"
 	"github.com/qaisjp/go-discord-irc/dstate"
-	ircnick "github.com/qaisjp/go-discord-irc/irc/nick"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/pkg/errors"
@@ -146,31 +145,10 @@ func (d *discordBot) publishMessage(s *discordgo.Session, m *discordgo.Message, 
 		content = spoilerPattern.ReplaceAllString(content, colorCode+"1,1$1"+colorCode)
 	}
 
-	pmTarget := ""
-	// Blank guild means that it's a PM
-	if m.GuildID == "" {
-		pmTarget, content = pmTargetFromContent(content, d.bridge.Config.Discriminator)
-		// if the target could not be deduced. tell them this.
-		switch pmTarget {
-		case "":
-			_, _ = d.Session.ChannelMessageSend(
-				m.ChannelID,
-				fmt.Sprintf(
-					"Don't know who that is. Can't PM. Try 'name@%s, message here'",
-					d.bridge.Config.Discriminator))
-			return
-		case "*UNKNOWN*":
-			return
-		default:
-			break
-		}
-	}
-
 	d.bridge.discordMessageEventsChan <- &DiscordMessage{
 		Message:  m,
 		Content:  content,
 		IsAction: isAction,
-		PmTarget: pmTarget,
 	}
 
 	for _, attachment := range m.Attachments {
@@ -178,7 +156,6 @@ func (d *discordBot) publishMessage(s *discordgo.Session, m *discordgo.Message, 
 			Message:  m,
 			Content:  attachment.URL,
 			IsAction: isAction,
-			PmTarget: pmTarget,
 		}
 	}
 }
@@ -237,7 +214,6 @@ func (d *discordBot) publishReaction(s *discordgo.Session, r *discordgo.MessageR
 		Message:  m,
 		Content:  content,
 		IsAction: true,
-		PmTarget: "",
 	}
 }
 
@@ -254,27 +230,10 @@ func (d *discordBot) ParseText(m *discordgo.Message) string {
 	content := m.Content
 
 	for _, user := range m.Mentions {
-		// Nickname is their username by default
-		nick := user.Username
-
-		// If we can get their member + nick, set nick to the real nick
-		member, err := d.Session.State.Member(d.guildID, user.ID)
-		if err == nil && member.Nick != "" {
-			nick = member.Nick
-		}
-
-		username := d.bridge.IRCPuppeteer.generateNickname(DiscordUser{
-			ID:            user.ID,
-			Username:      user.Username,
-			Discriminator: user.Discriminator,
-			Nick:          nick,
-			Bot:           user.Bot,
-			Online:        false,
-		})
-
+		ircNick := d.bridge.IRCPuppeteer.generateNickname(user)
 		content = strings.NewReplacer(
-			"<@"+user.ID+">", username,
-			"<@!"+user.ID+">", username,
+			"<@"+user.ID+">", ircNick,
+			"<@!"+user.ID+">", ircNick,
 		).Replace(content)
 	}
 
@@ -442,43 +401,4 @@ func GetMemberNick(m *discordgo.Member) string {
 	}
 
 	return m.Nick
-}
-
-// pmTargetFromContent returns an irc nick given a message sent to an IRC user via Discord
-//
-// Returns empty string if the nick could not be deduced.
-// Also returns the content without the nick
-func pmTargetFromContent(content string, discriminator string) (nick, newContent string) {
-	// Pull out substrings
-	// "qais,come on, i need this!" gives []string{"qais", "come on, i need this!"}
-	subs := strings.SplitN(content, ",", 2)
-
-	if len(subs) != 2 {
-		return "", ""
-	}
-
-	nick = subs[0]
-	newContent = strings.TrimPrefix(subs[1], " ")
-
-	nickParts := strings.Split(nick, "@")
-
-	// we were given an invalid nick if we can't split it into 2 parts
-	if len(nickParts) < 2 {
-		return "", ""
-	}
-
-	if nickParts[1] != discriminator {
-		return "*UNKNOWN*", ""
-	}
-
-	nick = nickParts[0]
-
-	// check if name is a valid nick
-	for _, c := range []byte(nick) {
-		if !ircnick.IsNickChar(c) {
-			return "", ""
-		}
-	}
-
-	return
 }

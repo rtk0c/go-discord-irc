@@ -5,11 +5,11 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/mozillazg/go-unidecode"
 	"github.com/pkg/errors"
 
 	ircnick "github.com/qaisjp/go-discord-irc/irc/nick"
-	log "github.com/sirupsen/logrus"
 )
 
 // IRCPuppeteer should only be used from one thread.
@@ -110,75 +110,11 @@ func sanitiseNickname(nick string) string {
 	return string(newNick)
 }
 
-func (m *IRCPuppeteer) generateNickname(discord DiscordUser) string {
-	nick := sanitiseNickname(discord.Nick)
-	suffix := m.bridge.Config.Suffix
-	newNick := nick + suffix
+func (m *IRCPuppeteer) generateNickname(discord *discordgo.User) string {
+	orig := sanitiseNickname(discord.Username)
+	new := orig + m.usernameDecoration
 
-	useFallback := len(newNick) > m.bridge.Config.MaxNickLength || m.bridge.ircListener.DoesUserExist(newNick)
-	// log.WithFields(log.Fields{
-	// 	"length":      len(newNick) > ircnick.MAXLENGTH,
-	// 	"useFallback": useFallback,
-	// }).Infoln("nickgen: fallback?")
-
-	if !useFallback {
-		guild, err := m.bridge.discord.Session.State.Guild(m.bridge.Config.GuildID)
-		if err != nil {
-			// log.Fatalln("nickgen: guild not found when generating nickname")
-			return ""
-		}
-
-		for _, member := range guild.Members {
-			if member.User.ID == discord.ID {
-				continue
-			}
-
-			name := member.Nick
-			if member.Nick == "" {
-				name = member.User.Username
-			}
-
-			if name == "" {
-				log.WithField("member", member).Errorln("blank username encountered")
-				continue
-			}
-
-			if strings.EqualFold(sanitiseNickname(name), nick) {
-				// log.WithField("member", member).Infoln("nickgen: using fallback because of discord")
-				useFallback = true
-				break
-			}
-		}
-	}
-
-	if useFallback {
-		discriminator := discord.Discriminator
-		username := sanitiseNickname(discord.Username)
-		suffix = m.bridge.Config.Separator + discriminator + suffix
-
-		// Maximum length of a username but without the suffix
-		length := ircnick.MAXLENGTH - len(suffix)
-		if length >= len(username) {
-			length = len(username)
-			// log.Infoln("nickgen: maximum length limit not reached")
-		}
-
-		newNick = username[:length] + suffix
-		// log.WithFields(log.Fields{
-		// 	"nick":     discord.Nick,
-		// 	"username": discord.Username,
-		// 	"newNick":  newNick,
-		// }).Infoln("nickgen: resultant nick after falling back")
-		return newNick
-	}
-
-	// log.WithFields(log.Fields{
-	// 	"nick":     discord.Nick,
-	// 	"username": discord.Username,
-	// 	"newNick":  newNick,
-	// }).Infoln("nickgen: resultant nick WITHOUT falling back")
-
-	return newNick
+	return new
 }
 
 // SendMessage sends a broken down Discord Message to a particular IRC channel.
@@ -188,12 +124,12 @@ func (m *IRCPuppeteer) SendMessage(channel string, msg *DiscordMessage) {
 	}
 
 	content := msg.Content
+	authorNick := m.generateNickname(msg.Author)
 
 	channel = strings.Split(channel, " ")[0]
 
 	useRelayMsg := m.IsUsingRelayMsg()
 
-	length := len(msg.Author.Username)
 	for _, line := range strings.Split(content, "\n") {
 		// if strings.HasPrefix(line, "/me ") && len(line) > 4 {
 		// 	ircMessage.IsAction = true
@@ -201,36 +137,18 @@ func (m *IRCPuppeteer) SendMessage(channel string, msg *DiscordMessage) {
 		// }
 
 		if useRelayMsg {
-			username := sanitiseNickname(msg.Author.Username)
-			username += m.usernameDecoration
-
 			var fmtstr string
 			if msg.IsAction {
 				fmtstr = "RELAYMSG %s %s :\x01ACTION %s\x01"
 			} else {
 				fmtstr = "RELAYMSG %s %s :%s"
 			}
-			m.bridge.ircListener.SendRawf(fmtstr, channel, username, line)
+			m.bridge.ircListener.SendRawf(fmtstr, channel, authorNick, line)
 		} else {
-			line = fmt.Sprintf(
-				"<%s#%s> %s",
-				// TODO(rtk0c) what's the point of using U+200B ZERO WIDTH SPACE?
-				msg.Author.Username[:1]+"\u200B"+msg.Author.Username[1:length],
-				// TODO(rtk0c) discord no longer uses this
-				msg.Author.Discriminator,
-				line,
-			)
+			line = fmt.Sprintf("<%s> %s", authorNick, line)
 			m.bridge.ircListener.Privmsg(channel, line)
 		}
 	}
-}
-
-// RequestChannels finds all the Discord channels this user belongs to,
-// and then find pairings in the global pairings list
-// Currently just returns all participating IRC channels
-// TODO (?)
-func (m *IRCPuppeteer) RequestChannels(userID string) []Mapping {
-	return m.bridge.mappings
 }
 
 func (m *IRCPuppeteer) isIgnoredHostmask(mask string) bool {

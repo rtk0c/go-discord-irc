@@ -7,7 +7,6 @@ import (
 	"io"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/gobwas/glob"
@@ -67,17 +66,14 @@ type Config struct {
 	// Map from Discord to IRC
 	ChannelMappings map[string]string
 
-	IRCServer       string // Server address to use, example `irc.freenode.net:7000`.
-	IRCServerPass   string // Optional password for connecting to the IRC server
-	IRCBotNick      string // i.e, "DiscordBot", required to listen for messages in all cases
-	WebIRCPass      string
-	ConnectionLimit int // Number of IRC connections we can spawn
+	IRCServer     string // Server address to use, example `irc.freenode.net:7000`.
+	IRCServerPass string // Optional password for connecting to the IRC server
+	IRCBotNick    string // i.e, "DiscordBot", required to listen for messages in all cases
 
-	SaslLogin       string
-	SaslPassword    string
-
-	// TODO get rid of this
-	Discriminator string // unique per IRC network connected to, keeps PMs working
+	// If not "", perform SASL authentication during connection.
+	// Otherwise, if needed, login needs to be configured manually through `IRCListenerPrejoinCommands`
+	SaslLogin    string
+	SaslPassword string
 
 	IRCPuppetPrejoinCommands   []string // Commands for each connection to send before joining channels
 	IRCListenerPrejoinCommands []string
@@ -100,16 +96,11 @@ type Config struct {
 	// This should be used only for testing.
 	InsecureSkipVerify bool
 
-	Suffix    string // Suffix is the suffix to append to IRC puppets
-	Separator string // Separator is used in IRC puppets' username, in fallback situations, between the discriminator and username.
-
-	// CooldownDuration is the duration in seconds for an IRC puppet to stay online before being disconnected
-	CooldownDuration time.Duration
-
 	// ShowJoinQuit determines whether or not to show JOIN, QUIT, KICK messages on Discord
 	ShowJoinQuit bool
 
 	// Maximum Nicklength for irc server
+	// TODO respect this value
 	MaxNickLength int
 
 	Debug         bool
@@ -121,9 +112,6 @@ func MakeDefaultConfig() *Config {
 		IRCPuppetPrejoinCommands: []string{"MODE ${NICK} +D"},
 		AvatarURL:                "https://robohash.org/${USERNAME}.png?set=set4",
 		IRCBotNick:               "~d",
-		Suffix:                   "~d",
-		Separator:                "~",
-		CooldownDuration:         time.Hour * 24,
 		ShowJoinQuit:             false,
 		MaxNickLength:            ircnick.MAXLENGTH,
 	}
@@ -133,14 +121,6 @@ func LoadConfigInto(config *Config, r io.Reader) error {
 	err := json.NewDecoder(r).Decode(&config)
 	if err != nil {
 		return err
-	}
-
-	if config.Discriminator == "" {
-		return errors.New("'Discriminator' config option is required and cannot be empty")
-	}
-
-	if config.WebIRCPass == "" {
-		log.Warnln("webirc_pass is empty")
 	}
 
 	if len(config.ChannelMappings) == 0 {
@@ -328,7 +308,7 @@ func New(conf *Config) (*Bridge, error) {
 		return nil, errors.Wrap(err, "Could not create discord bot")
 	}
 
-	dib.ircListener = newIRCListener(dib, conf.WebIRCPass)
+	dib.ircListener = newIRCListener(dib)
 	if dib.IRCPuppeteer, err = newIRCPuppeteer(dib); err != nil {
 		return nil, fmt.Errorf("failed to create IRCPuppeteer: %w", err)
 	}
@@ -383,10 +363,6 @@ func (b *Bridge) SetupIRCConnection(con *irc.Connection, hostname, ip string) {
 	con.UseSASL = b.Config.SaslLogin != ""
 	con.SASLLogin = b.Config.SaslLogin
 	con.SASLPassword = b.Config.SaslPassword
-
-	if b.Config.WebIRCPass != "" {
-		con.WebIRC = fmt.Sprintf("%s discord %s %s", b.Config.WebIRCPass, hostname, ip)
-	}
 }
 
 // GetJoinCommand produces a JOIN command based on the provided mappings
@@ -536,17 +512,11 @@ func (b *Bridge) loop() {
 			mapping, ok := b.GetMappingByDiscord(msg.ChannelID)
 
 			// Do not do anything if we do not have a mapping for the PUBLIC channel
-			if !ok && msg.PmTarget == "" {
-				// log.Warnln("Ignoring message sent from an unhandled Discord channel.")
+			if !ok {
 				continue
 			}
 
-			target := msg.PmTarget
-			if target == "" {
-				target = mapping.IRCChannel
-			}
-
-			b.IRCPuppeteer.SendMessage(target, msg)
+			b.IRCPuppeteer.SendMessage(mapping.IRCChannel, msg)
 
 		// Notification to potentially update, or create, a user
 		// We should not receive anything on this channel if we're in Simple Mode
