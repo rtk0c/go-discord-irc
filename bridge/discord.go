@@ -11,7 +11,6 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -51,7 +50,7 @@ func newDiscord(bridge *Bridge, botToken, guildID string) (*discordBot, error) {
 
 func (d *discordBot) Open() error {
 	d.transmitter = transmitter.New(d.Session, d.guildID, "irc-bridge", true)
-	d.transmitter.Log = logrus.NewEntry(logrus.StandardLogger())
+	d.transmitter.Log = log.NewEntry(log.StandardLogger())
 	if err := d.transmitter.RefreshGuildWebhooks(nil); err != nil {
 		return fmt.Errorf("failed to refresh guild webhooks: %w", err)
 	}

@@ -1,7 +1,6 @@
 package bridge
 
 import (
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,7 +11,6 @@ import (
 	"github.com/gobwas/glob"
 	"github.com/pkg/errors"
 	ircnick "github.com/qaisjp/go-discord-irc/irc/nick"
-	irc "github.com/qaisjp/go-ircevent"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -65,6 +63,8 @@ type Config struct {
 
 	// Map from Discord to IRC
 	ChannelMappings map[string]string
+	// Parsed on load from `ChannelMappings`
+	ircChannelKeys map[string]string // From "#test" to "password"
 
 	IRCServer     string // Server address to use, example `irc.freenode.net:7000`.
 	IRCServerPass string // Optional password for connecting to the IRC server
@@ -107,8 +107,8 @@ type Config struct {
 	DebugPresence bool
 }
 
-func MakeDefaultConfig() *Config {
-	return &Config{
+func MakeDefaultConfig() Config {
+	return Config{
 		IRCPuppetPrejoinCommands: []string{"MODE ${NICK} +D"},
 		AvatarURL:                "https://robohash.org/${USERNAME}.png?set=set4",
 		IRCBotNick:               "~d",
@@ -117,17 +117,35 @@ func MakeDefaultConfig() *Config {
 	}
 }
 
-func LoadConfigInto(config *Config, r io.Reader) error {
-	err := json.NewDecoder(r).Decode(&config)
+func LoadConfigFile(into *Config, r io.Reader) error {
+	err := json.NewDecoder(r).Decode(&into)
 	if err != nil {
 		return err
 	}
 
-	if len(config.ChannelMappings) == 0 {
+	if len(into.ChannelMappings) == 0 {
 		log.Warnln("Channel mappings are missing!")
 	}
 
 	return nil
+}
+
+// Compute auxiliary information (all private fields) from the primary config (public fields)
+func resolveConfigAux(config *Config) {
+	mappings := config.ChannelMappings
+
+	config.ircChannelKeys = make(map[string]string, len(mappings))
+
+	for irc, discord := range mappings {
+		ircParts := strings.Split(irc, " ")
+		ircChannel := ircParts[0]
+		if parts := len(ircParts); parts != 1 && parts > 2 {
+			log.Errorf("IRC channel irc %+v (to discord %+v) is invalid. Expected 0 or 1 spaces in the string. Ignoring.", irc, discord)
+			continue
+		} else if parts == 2 {
+			config.ircChannelKeys[ircChannel] = ircParts[1]
+		}
+	}
 }
 
 // A Bridge represents a bridging between an IRC server and channels in a Discord server
@@ -137,9 +155,6 @@ type Bridge struct {
 	discord      *discordBot
 	ircListener  *ircListener
 	IRCPuppeteer *IRCPuppeteer
-
-	mappings       []Mapping
-	ircChannelKeys map[string]string // From "#test" to "password"
 
 	done chan bool
 
@@ -157,134 +172,10 @@ func (b *Bridge) Close() {
 	<-b.done
 }
 
-// TODO: Use errors package
-func (b *Bridge) load(opts *Config) error {
-	if opts.IRCServer == "" {
-		return errors.New("missing server name")
-	}
-
-	if err := b.SetChannelMappings(opts.ChannelMappings); err != nil {
-		return errors.Wrap(err, "channel mappings could not be set")
-	}
-
-	// This should not be used anymore!
-	opts.ChannelMappings = nil
-
-	return nil
-}
-
-// SetChannelMappings allows you to set (or update) the
-// hashmap containing irc to discord mappings.
-//
-// Calling this function whilst the bot is running will
-// add or remove IRC bots accordingly.
-func (b *Bridge) SetChannelMappings(inMappings map[string]string) error {
-	var mappings []Mapping
-	ircChannelKeys := make(map[string]string, len(mappings))
-	for irc, discord := range inMappings {
-		ircParts := strings.Split(irc, " ")
-		ircChannel := ircParts[0]
-		if parts := len(ircParts); parts != 1 && parts > 2 {
-			log.Errorf("IRC channel irc %+v (to discord %+v) is invalid. Expected 0 or 1 spaces in the string. Ignoring.", irc, discord)
-			continue
-		} else if parts == 2 {
-			ircChannelKeys[ircChannel] = ircParts[1]
-		}
-
-		mappings = append(mappings, Mapping{
-			DiscordChannel: discord,
-			IRCChannel:     ircChannel,
-		})
-	}
-
-	// Check for duplicate channels
-	for i, mapping := range mappings {
-		for j, check := range mappings {
-			if (mapping.DiscordChannel == check.DiscordChannel) || (mapping.IRCChannel == check.IRCChannel) {
-				if i != j {
-					return errors.New("channel_mappings contains duplicate entries")
-				}
-			}
-		}
-	}
-
-	oldMappings := b.mappings
-	b.mappings = mappings
-	b.ircChannelKeys = ircChannelKeys
-
-	// If doing some changes mid-bot
-	if oldMappings != nil {
-		var newMappings []Mapping
-		var removedMappings []Mapping
-
-		// Find positive difference
-		// These are the items in the new mappings list, but not the oldMappings
-		for _, mapping := range mappings {
-			found := false
-			for _, curr := range oldMappings {
-				if curr == mapping {
-					found = true
-					break
-				}
-			}
-
-			if !found {
-				newMappings = append(newMappings, mapping)
-			}
-		}
-
-		// Find negative difference
-		// These are the items in the oldMappings, but not the new one
-		for _, mapping := range oldMappings {
-			found := false
-			for _, curr := range mappings {
-				if curr == mapping {
-					found = true
-					break
-				}
-			}
-
-			if !found {
-				removedMappings = append(removedMappings, mapping)
-			}
-		}
-
-		// The bots needs to leave the remove mappings
-		rmChannels := []string{}
-		for _, mapping := range removedMappings {
-			// Looking for the irc channel to remove
-			// inside our list of newly added channels.
-			//
-			// This will prevent swaps from joinquitting the bots.
-			found := false
-			for _, curr := range newMappings {
-				if curr.IRCChannel == mapping.IRCChannel {
-					found = true
-				}
-			}
-
-			// If we've not found this channel to remove in the new channels
-			// actually part the channel
-			if !found {
-				rmChannels = append(rmChannels, mapping.IRCChannel)
-			}
-		}
-
-		b.ircListener.SendRaw("PART " + strings.Join(rmChannels, ","))
-
-		// The bots needs to join the new mappings
-		joinChannels := []string{}
-		for _, mapping := range newMappings {
-			joinChannels = append(joinChannels, mapping.IRCChannel)
-		}
-		b.ircListener.SendRaw("JOIN " + strings.Join(joinChannels, ","))
-	}
-
-	return nil
-}
-
 // New Bridge
 func New(conf *Config) (*Bridge, error) {
+	resolveConfigAux(conf)
+
 	dib := &Bridge{
 		Config: conf,
 		done:   make(chan bool),
@@ -295,10 +186,6 @@ func New(conf *Config) (*Bridge, error) {
 		removeUserChan:           make(chan string),
 
 		emoji: make(map[string]*discordgo.Emoji),
-	}
-
-	if err := dib.load(conf); err != nil {
-		return nil, errors.Wrap(err, "configuration invalid")
 	}
 
 	var err error
@@ -312,8 +199,6 @@ func New(conf *Config) (*Bridge, error) {
 	if dib.IRCPuppeteer, err = newIRCPuppeteer(dib); err != nil {
 		return nil, fmt.Errorf("failed to create IRCPuppeteer: %w", err)
 	}
-
-	dib.ircListener.SetDebugMode(conf.Debug)
 
 	go dib.loop()
 
@@ -342,71 +227,26 @@ func (b *Bridge) Open() (err error) {
 	return
 }
 
-// SetupIRCConnection sets up an IRC connection with config settings like
-// UseTLS, InsecureSkipVerify, and WebIRCPass.
-func (b *Bridge) SetupIRCConnection(con *irc.Connection, hostname, ip string) {
-	if !b.Config.NoTLS {
-		con.UseTLS = true
-		con.TLSConfig = &tls.Config{
-			InsecureSkipVerify: b.Config.InsecureSkipVerify,
-		}
-	}
-
-	// On kick, rejoin the channel
-	con.AddCallback("KICK", func(e *irc.Event) {
-		if e.Arguments[1] == con.GetNick() {
-			con.Join(e.Arguments[0])
-		}
-	})
-
-	con.Password = b.Config.IRCServerPass
-	con.UseSASL = b.Config.SaslLogin != ""
-	con.SASLLogin = b.Config.SaslLogin
-	con.SASLPassword = b.Config.SaslPassword
-}
-
-// GetJoinCommand produces a JOIN command based on the provided mappings
-func (b *Bridge) GetJoinCommand(mappings []Mapping) string {
-	var channels, keyedChannels, keys []string
-
-	for _, mapping := range mappings {
-		channel := mapping.IRCChannel
-		key, keyed := b.ircChannelKeys[channel]
-
-		if keyed {
-			keyedChannels = append(keyedChannels, channel)
-			keys = append(keys, key)
-		} else {
-			channels = append(channels, channel)
-		}
-	}
-
-	// Just append normal channels to the end of keyed channelsG
-	keyedChannels = append(keyedChannels, channels...)
-
-	return "JOIN " + strings.Join(keyedChannels, ",") + " " + strings.Join(keys, ",")
-}
-
 // GetMappingByIRC returns a Mapping for a given IRC channel.
 // Returns nil if a Mapping does not exist.
-func (b *Bridge) GetMappingByIRC(channel string) (Mapping, bool) {
-	for _, mapping := range b.mappings {
-		if strings.EqualFold(mapping.IRCChannel, channel) {
-			return mapping, true
+func (b *Bridge) GetMappingByIRC(channel string) (string, bool) {
+	for ircChannel, discordChannel := range b.Config.ChannelMappings {
+		if strings.EqualFold(ircChannel, channel) {
+			return discordChannel, true
 		}
 	}
-	return Mapping{}, false
+	return "", false
 }
 
 // GetMappingByDiscord returns a Mapping for a given Discord channel.
 // Returns nil if a Mapping does not exist.
-func (b *Bridge) GetMappingByDiscord(channel string) (Mapping, bool) {
-	for _, mapping := range b.mappings {
-		if mapping.DiscordChannel == channel {
-			return mapping, true
+func (b *Bridge) GetMappingByDiscord(channel string) (string, bool) {
+	for ircChannel, discordChannel := range b.Config.ChannelMappings {
+		if discordChannel == channel {
+			return ircChannel, true
 		}
 	}
-	return Mapping{}, false
+	return "", false
 }
 
 var emojiRegex = regexp.MustCompile("(:[a-zA-Z_-]+:)")
@@ -417,7 +257,7 @@ func (b *Bridge) loop() {
 
 		// Messages from IRC to Discord
 		case msg := <-b.discordMessagesChan:
-			mapping, ok := b.GetMappingByIRC(msg.IRCChannel)
+			mappedDiscordChannel, ok := b.GetMappingByIRC(msg.IRCChannel)
 
 			if !ok {
 				log.Warnln("Ignoring message sent from an unhandled IRC channel.")
@@ -470,9 +310,9 @@ func (b *Bridge) loop() {
 
 			if username == "" {
 				// System messages come straight from the bot
-				if _, err := b.discord.Session.ChannelMessageSend(mapping.DiscordChannel, content); err != nil {
+				if _, err := b.discord.Session.ChannelMessageSend(mappedDiscordChannel, content); err != nil {
 					log.WithError(err).WithFields(log.Fields{
-						"msg.channel":  mapping.DiscordChannel,
+						"msg.channel":  mappedDiscordChannel,
 						"msg.username": username,
 						"msg.content":  content,
 					}).Errorln("could not transmit SYSTEM message to discord")
@@ -480,7 +320,7 @@ func (b *Bridge) loop() {
 			} else {
 				go func() {
 					_, err := b.discord.transmitter.Send(
-						mapping.DiscordChannel,
+						mappedDiscordChannel,
 						&discordgo.WebhookParams{
 							Username:  username,
 							AvatarURL: avatar,
@@ -498,7 +338,7 @@ func (b *Bridge) loop() {
 					if err != nil {
 						log.WithFields(log.Fields{
 							"error":        err,
-							"msg.channel":  mapping.DiscordChannel,
+							"msg.channel":  mappedDiscordChannel,
 							"msg.username": username,
 							"msg.avatar":   avatar,
 							"msg.content":  content,
@@ -509,14 +349,18 @@ func (b *Bridge) loop() {
 
 		// Messages from Discord to IRC
 		case msg := <-b.discordMessageEventsChan:
-			mapping, ok := b.GetMappingByDiscord(msg.ChannelID)
-
+			mappedIRCChannel, ok := b.GetMappingByDiscord(msg.ChannelID)
 			// Do not do anything if we do not have a mapping for the PUBLIC channel
 			if !ok {
 				continue
 			}
 
-			b.IRCPuppeteer.SendMessage(mapping.IRCChannel, msg)
+			_, authorIgnored := b.Config.DiscordIgnores[msg.Author.ID]
+			if authorIgnored {
+				continue
+			}
+
+			b.IRCPuppeteer.SendMessage(mappedIRCChannel, msg)
 
 		// Notification to potentially update, or create, a user
 		// We should not receive anything on this channel if we're in Simple Mode

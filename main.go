@@ -36,15 +36,19 @@ func main() {
 
 	SetLogDebug(*debugMode)
 
+	// Priority:
+	// low: default values
 	dibConfig := bridge.MakeDefaultConfig()
-	err = bridge.LoadConfigInto(dibConfig, configFile)
+	// medium: user-provided config
+	err = bridge.LoadConfigFile(&dibConfig, configFile)
 	if err != nil {
 		log.Fatalln(errors.Wrap(err, "could not read config"))
 	}
+	// high: user-provided cli flags
 	transfer(&dibConfig.Debug, debugMode)
 	transfer(&dibConfig.DebugPresence, debugPresence)
 
-	dib, err := bridge.New(dibConfig)
+	dib, err := bridge.New(&dibConfig)
 	if err != nil {
 		log.WithField("error", err).Fatalln("Go-Discord-IRC failed to initialise.")
 		return

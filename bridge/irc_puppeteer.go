@@ -67,11 +67,6 @@ func (m *IRCPuppeteer) IsUsingRelayMsg() bool {
 func (m *IRCPuppeteer) Close() {
 }
 
-func (m *IRCPuppeteer) ircIgnoredDiscord(user string) bool {
-	_, ret := m.bridge.Config.DiscordIgnores[user]
-	return ret
-}
-
 // Converts a nickname to a sanitised form.
 // Does not check IRC or Discord existence, so don't use this method
 // unless you're also checking IRC and Discord.
@@ -119,10 +114,6 @@ func (m *IRCPuppeteer) generateNickname(discord *discordgo.User) string {
 
 // SendMessage sends a broken down Discord Message to a particular IRC channel.
 func (m *IRCPuppeteer) SendMessage(channel string, msg *DiscordMessage) {
-	if m.ircIgnoredDiscord(msg.Author.ID) {
-		return
-	}
-
 	content := msg.Content
 	authorNick := m.generateNickname(msg.Author)
 
@@ -131,11 +122,6 @@ func (m *IRCPuppeteer) SendMessage(channel string, msg *DiscordMessage) {
 	useRelayMsg := m.IsUsingRelayMsg()
 
 	for _, line := range strings.Split(content, "\n") {
-		// if strings.HasPrefix(line, "/me ") && len(line) > 4 {
-		// 	ircMessage.IsAction = true
-		// 	ircMessage.Message = line[4:]
-		// }
-
 		if useRelayMsg {
 			var fmtstr string
 			if msg.IsAction {
@@ -149,31 +135,4 @@ func (m *IRCPuppeteer) SendMessage(channel string, msg *DiscordMessage) {
 			m.bridge.ircListener.Privmsg(channel, line)
 		}
 	}
-}
-
-func (m *IRCPuppeteer) isIgnoredHostmask(mask string) bool {
-	for _, ban := range m.bridge.Config.IRCIgnores {
-		if ban.Match(mask) {
-			return true
-		}
-	}
-	return false
-}
-
-func (m *IRCPuppeteer) isFilteredIRCMessage(txt string) bool {
-	for _, ban := range m.bridge.Config.IRCFilteredMessages {
-		if ban.Match(txt) {
-			return true
-		}
-	}
-	return false
-}
-
-func (m *IRCPuppeteer) isFilteredDiscordMessage(txt string) bool {
-	for _, ban := range m.bridge.Config.DiscordFilteredMessages {
-		if ban.Match(txt) {
-			return true
-		}
-	}
-	return false
 }
