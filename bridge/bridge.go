@@ -73,6 +73,9 @@ type Config struct {
 	WebIRCPass      string
 	ConnectionLimit int // Number of IRC connections we can spawn
 
+	SaslLogin       string
+	SaslPassword    string
+
 	// TODO get rid of this
 	Discriminator string // unique per IRC network connected to, keeps PMs working
 
@@ -377,6 +380,9 @@ func (b *Bridge) SetupIRCConnection(con *irc.Connection, hostname, ip string) {
 	})
 
 	con.Password = b.Config.IRCServerPass
+	con.UseSASL = b.Config.SaslLogin != ""
+	con.SASLLogin = b.Config.SaslLogin
+	con.SASLPassword = b.Config.SaslPassword
 
 	if b.Config.WebIRCPass != "" {
 		con.WebIRC = fmt.Sprintf("%s discord %s %s", b.Config.WebIRCPass, hostname, ip)
