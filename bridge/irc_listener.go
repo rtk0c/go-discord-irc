@@ -3,6 +3,7 @@ package bridge
 import (
 	"crypto/tls"
 	"fmt"
+	"regexp"
 	"strings"
 
 	ircf "github.com/qaisjp/go-discord-irc/irc/format"
@@ -249,6 +250,8 @@ func (i *ircListener) isPuppetNick(nick string) bool {
 	return false
 }
 
+var discordUsernameMention = regexp.MustCompile(`<@[a-z0-9_.]+>`)
+
 func (i *ircListener) OnPrivateMessage(e *irc.Event) {
 	// Ignore private messages
 	if string(e.Arguments[0][0]) != "#" {
@@ -271,11 +274,21 @@ func (i *ircListener) OnPrivateMessage(e *irc.Event) {
 		return
 	}
 
-	// TODO(rtk0c): transform IRC nick to discord username
-	replacements := []string{}
-	msg := strings.NewReplacer(
-		replacements...,
-	).Replace(e.Message())
+	d := i.bridge.discord
+	msg := discordUsernameMention.ReplaceAllStringFunc(e.Message(), func(m string) string {
+		username := m[2 : len(m)-1]
+		userID := d.GetUserID(d.guildID, username)
+		// Didn't find corresponding user, bail out
+		if userID == "" {
+			log.WithFields(log.Fields{
+				"ircUser":         e.User,
+				"ircMessage":      e.Message(),
+				"discordUsername": username,
+			}).Warnln("cannot find corresponding discord user with mentioned username")
+			return username
+		}
+		return "<@" + userID + ">"
+	})
 
 	if e.Code == "CTCP_ACTION" {
 		msg = "_" + msg + "_"

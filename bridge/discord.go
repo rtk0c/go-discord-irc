@@ -393,6 +393,21 @@ func (d *discordBot) GetAvatar(guildID, username string) (_ string) {
 	return discordgo.EndpointUserAvatar(foundMember.User.ID, foundMember.User.Avatar)
 }
 
+func (d *discordBot) GetUserID(guildID, username string) string {
+	guild, err := d.Session.State.Guild(guildID)
+	if err != nil {
+		panic(err)
+	}
+
+	for _, member := range guild.Members {
+		if username == member.User.Username {
+			return member.User.ID
+		}
+	}
+
+	return ""
+}
+
 // GetMemberNick returns the real display name for a Discord GuildMember
 func GetMemberNick(m *discordgo.Member) string {
 	if m.Nick == "" {
