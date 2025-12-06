@@ -103,6 +103,9 @@ type Config struct {
 	// TODO respect this value
 	MaxNickLength int
 
+	PastebinURL   string
+	PastebinToken string
+
 	Debug         bool
 	DebugPresence bool
 }

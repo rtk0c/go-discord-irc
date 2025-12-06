@@ -1,7 +1,11 @@
 package bridge
 
 import (
+	"bytes"
 	"fmt"
+	"io"
+	"mime/multipart"
+	"net/http"
 	"regexp"
 	"runtime/debug"
 	"strings"
@@ -89,6 +93,59 @@ func userToMention(u *discordgo.User) (mention string) {
 var spoilerPattern = regexp.MustCompile(`\|\|(.*?)\|\|`)
 var colorCode = string(rune(3))
 
+var cdnDiscordAppURL = regexp.MustCompile(`\d+\/(\d+)\/([^?]+)\?`)
+
+func cleanupCdnDiscordAppURL(url string) string {
+	matches := cdnDiscordAppURL.FindStringSubmatch(url)
+	if len(matches) != 3 {
+		return ""
+	}
+	return matches[1] + "-" + matches[2]
+}
+
+func reuploadAttachment(rustypasteURL, rustypasteToken, sourceURL string) string {
+	var reqBody bytes.Buffer
+	w := multipart.NewWriter(&reqBody)
+	w.WriteField("remote", sourceURL)
+	w.Close()
+
+	req, err := http.NewRequest(http.MethodPost, rustypasteURL, &reqBody)
+	if err != nil {
+		log.Errorln(err)
+		return sourceURL
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	req.Header.Set("Authorization", rustypasteToken)
+
+	reuploadFilename := cleanupCdnDiscordAppURL(sourceURL)
+	if reuploadFilename == "" {
+		log.Errorln("attachment file name parse failed")
+		return sourceURL
+	}
+	req.Header.Set("filename", reuploadFilename)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Errorln(err)
+		return sourceURL
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Errorln(err)
+		return sourceURL
+	}
+	if resp.StatusCode != http.StatusOK {
+		log.Errorln("rustypatse upload failed", resp.Status, respBody)
+		return sourceURL
+	}
+
+	newURL := string(respBody)
+	newURL = strings.TrimSpace(newURL)
+	return newURL
+}
+
 func (d *discordBot) publishMessage(s *discordgo.Session, m *discordgo.Message, wasEdit bool) {
 	// Fix crash if these fields don't exist
 	if m.Author == nil || s.State.User == nil {
@@ -158,10 +215,13 @@ func (d *discordBot) publishMessage(s *discordgo.Session, m *discordgo.Message, 
 		IsAction: isAction,
 	}
 
+	pastebinURL := d.bridge.Config.PastebinURL
+	pastebinToken := d.bridge.Config.PastebinToken
 	for _, attachment := range m.Attachments {
+		res := reuploadAttachment(pastebinURL, pastebinToken, attachment.URL)
 		d.bridge.discordMessageEventsChan <- &DiscordMessage{
 			Message:  m,
-			Content:  attachment.URL,
+			Content:  res,
 			IsAction: isAction,
 		}
 	}
@@ -233,15 +293,25 @@ var emoteRegex = regexp.MustCompile(`<a?(:\w+:)\d+>`)
 
 // Up to date as of https://git.io/v5kJg
 func (d *discordBot) ParseText(m *discordgo.Message) string {
-	// Replace @user mentions with name~d mentions
 	content := m.Content
 
+	//////////////
+	// Literal replacements
+
+	replacements := []string{}
+
+	// Break down malformed newlines
+	replacements = append(replacements,
+		"\r\n", "\n", // replace CRLF with LF
+		"\r", "\n", // replace CR with LF
+	)
+
+	// Replace @user mentions with name~d mentions
 	for _, user := range m.Mentions {
 		ircNick := d.bridge.IRCPuppeteer.generateNickname(user)
-		content = strings.NewReplacer(
+		replacements = append(replacements,
 			"<@"+user.ID+">", ircNick,
-			"<@!"+user.ID+">", ircNick,
-		).Replace(content)
+			"<@!"+user.ID+">", ircNick)
 	}
 
 	// Copied from message.go ContentWithMoreMentionsReplaced(s)
@@ -251,8 +321,13 @@ func (d *discordBot) ParseText(m *discordgo.Message) string {
 			continue
 		}
 
-		content = strings.Replace(content, "<&"+role.ID+">", "@"+role.Name, -1)
+		replacements = append(replacements, "<&"+role.ID+">", "@"+role.Name)
 	}
+
+	content = strings.NewReplacer(replacements...).Replace(content)
+
+	//////////////
+	// Regex and custom logic replacements
 
 	// Also copied from message.go ContentWithMoreMentionsReplaced(s)
 	content = patternChannels.ReplaceAllStringFunc(content, func(mention string) string {
@@ -263,10 +338,6 @@ func (d *discordBot) ParseText(m *discordgo.Message) string {
 
 		return "#" + channel.Name
 	})
-
-	// Break down malformed newlines
-	content = strings.Replace(content, "\r\n", "\n", -1) // replace CRLF with LF
-	content = strings.Replace(content, "\r", "\n", -1)   // replace CR with LF
 
 	// Replace <#xxxxx> channel mentions
 	content = channelMention.ReplaceAllStringFunc(content, func(str string) string {
