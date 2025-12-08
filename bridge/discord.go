@@ -409,13 +409,12 @@ func isStatusOnline(status discordgo.Status) bool {
 
 func (d *discordBot) sendUpdateUserChan(user DiscordUser) bool {
 	// Only log this for online events, because offline events won't have this
-	if (user.Username == "" || user.Discriminator == "") && user.Online {
+	if (user.Username == "") && user.Online {
 		log.WithFields(log.Fields{
-			"err":                errors.WithStack(errors.New("Username or Discriminator is empty")).Error(),
-			"user.Username":      user.Username,
-			"user.Discriminator": user.Discriminator,
-			"user.ID":            user.ID,
-		}).Println("sendUpdateUserChan called with empty Username and Discriminator (see stack below)")
+			"err":           errors.WithStack(errors.New("empty username")).Error(),
+			"user.Username": user.Username,
+			"user.ID":       user.ID,
+		}).Println("sendUpdateUserChan called with empty Username (see stack below)")
 		debug.PrintStack()
 	}
 
@@ -546,11 +545,10 @@ func (d *discordBot) handleMemberUpdate(m *discordgo.Member, forceOnline bool) {
 	}
 
 	d.sendUpdateUserChan(DiscordUser{
-		ID:            m.User.ID,
-		Username:      m.User.Username,
-		Discriminator: m.User.Discriminator,
-		Nick:          GetMemberNick(m),
-		Bot:           m.User.Bot,
-		Online:        isStatusOnline(status),
+		ID:       m.User.ID,
+		Username: m.User.Username,
+		Nick:     GetMemberNick(m),
+		Bot:      m.User.Bot,
+		Online:   isStatusOnline(status),
 	})
 }

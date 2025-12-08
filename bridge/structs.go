@@ -21,12 +21,11 @@ type IRCMessage struct {
 
 // DiscordUser is information that IRC needs to know about a user
 type DiscordUser struct {
-	ID            string // globally unique id
-	Username      string
-	Discriminator string
-	Nick          string // still non-unique
-	Bot           bool   // are they a bot?
-	Online        bool
+	ID       string // globally unique id
+	Username string
+	Nick     string // still non-unique
+	Bot      bool   // are they a bot?
+	Online   bool
 }
 
 // Mapping is a mapping between a Discord channel and an IRC channel (essentially a tuple).
