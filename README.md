@@ -60,15 +60,3 @@ https://discordapp.com/oauth2/authorize?&client_id=<YOUR_CLIENT_ID_HERE>&scope=b
 First edit `config.yml` file to your needs.
 Then launch `docker build -t go-discord-irc .` in the repository root folder.
 And then `docker run -d go-discord-irc` to run the bot in background.
-
-## Development
-
-A Makefile is provided to make getting started easier.
-
-To build a binary run `make build` this will produce a binary of `go-discord-irc` in the root dir.
-
-To build and run the binary run `make run`, this will use the `config.yaml` and start in debug.
-
-To Execute tests run `make test`
-
-Dependencies will be updated and installed with all the above commands or by running `make dev`
