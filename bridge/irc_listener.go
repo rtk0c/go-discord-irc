@@ -275,6 +275,9 @@ func (i *ircListener) OnPrivateMessage(e *irc.Event) {
 	}
 
 	d := i.bridge.discord
+	// We expect IRC users to send the Discord username identically as they are forwarded by the bridge as nicks.
+	// There is no reason why they can't do that, especially since every IRC client should support tab completing usernames.
+	// Introducing leniency like case insensitivity here is bad taste.
 	msg := discordUsernameMention.ReplaceAllStringFunc(e.Message(), func(m string) string {
 		username := m[2 : len(m)-1]
 		userID := d.GetUserID(d.guildID, username)

@@ -18,6 +18,30 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// NOTE: assumes the bot is session is part of exactly 1 gyukd
+type discordCache struct {
+	// username -> DiscordUser
+	membersCache map[string]*discordgo.Member
+}
+
+func (dc *discordCache) getMember(userID string) *discordgo.Member {
+	return dc.membersCache[userID]
+}
+
+func (dc *discordCache) onMemberListChunk(s *discordgo.Session, m *discordgo.GuildMembersChunk) {
+	for _, m := range m.Members {
+		dc.membersCache[m.User.ID] = m
+	}
+}
+
+func (dc *discordCache) onMemberUpdate(s *discordgo.Session, m *discordgo.GuildMemberUpdate) {
+	dc.membersCache[m.User.ID] = m.Member
+}
+
+func (dc *discordCache) onMemberLeave(s *discordgo.Session, m *discordgo.GuildMemberRemove) {
+	dc.membersCache[m.User.ID] = nil
+}
+
 type discordBot struct {
 	Session *discordgo.Session
 	bridge  *Bridge
@@ -25,6 +49,8 @@ type discordBot struct {
 	guildID string
 
 	transmitter *transmitter.Transmitter
+
+	cache discordCache
 }
 
 func newDiscord(bridge *Bridge, botToken, guildID string) (*discordBot, error) {
@@ -41,7 +67,12 @@ func newDiscord(bridge *Bridge, botToken, guildID string) (*discordBot, error) {
 		bridge:  bridge,
 
 		guildID: guildID,
+
+		cache: discordCache{
+			membersCache: make(map[string]*discordgo.Member),
+		},
 	}
+	dc := discord.cache
 
 	// These events are all fired in separate goroutines
 	discord.Session.AddHandler(discord.onReady)
@@ -56,6 +87,10 @@ func newDiscord(bridge *Bridge, botToken, guildID string) (*discordBot, error) {
 	discord.Session.AddHandler(discord.onPresenceUpdate)
 	discord.Session.AddHandler(discord.onTypingStart)
 	discord.Session.AddHandler(discord.onMessageReactionAdd)
+
+	discord.Session.AddHandler(dc.onMemberListChunk)
+	discord.Session.AddHandler(dc.onMemberUpdate)
+	discord.Session.AddHandler(dc.onMemberLeave)
 
 	return discord, nil
 }
@@ -423,68 +458,26 @@ func (d *discordBot) sendUpdateUserChan(user DiscordUser) bool {
 	return true
 }
 
+// Get URL to a Discord member's avatar, based on their username.
+// Note the username is expected to be formatted properly according to https://support.discord.com/hc/en-us/articles/12620128861463-New-Usernames-Display-Names
+//
 // See https://github.com/reactiflux/discord-irc/pull/230/files#diff-7202bb7fb017faefd425a2af32df2f9dR357
 func (d *discordBot) GetAvatar(guildID, username string) (_ string) {
-	// First get all members
-	guild, err := d.Session.State.Guild(guildID)
-	if err != nil {
-		panic(err)
-	}
-
-	// Matching members
-	var foundMember *discordgo.Member
-
-	// Try and find an exact case-sensitive match
-	for _, member := range guild.Members {
-		if (username != member.Nick) && (username != member.User.Username) {
-			continue
-		}
-
-		// If there are multiple matches, return an empty string
-		if foundMember == nil {
-			foundMember = member
-		} else {
-			return
-		}
-	}
-
-	// If no member found, check case-insensitively
-	if foundMember == nil {
-		for _, member := range guild.Members {
-			if !strings.EqualFold(username, member.Nick) && !strings.EqualFold(username, member.User.Username) {
-				continue
-			}
-
-			// If there are multiple matches, return an empty string
-			if foundMember == nil {
-				foundMember = member
-			} else {
-				return
-			}
-		}
-	}
-
-	// Do not provide an avatar if there is no matching user
-	if foundMember == nil {
+	member := d.cache.getMember(username)
+	if member == nil {
 		return
 	}
 
-	return discordgo.EndpointUserAvatar(foundMember.User.ID, foundMember.User.Avatar)
+	return discordgo.EndpointUserAvatar(member.User.ID, member.User.Avatar)
 }
 
 func (d *discordBot) GetUserID(guildID, username string) string {
-	guild, err := d.Session.State.Guild(guildID)
-	if err != nil {
-		panic(err)
+	member := d.cache.getMember(username)
+	if member == nil {
+		return ""
 	}
 
-	for _, member := range guild.Members {
-		if username == member.User.Username {
-			return member.User.ID
-		}
-	}
-
-	return ""
+	return member.User.ID
 }
 
 // GetMemberNick returns the real display name for a Discord GuildMember
