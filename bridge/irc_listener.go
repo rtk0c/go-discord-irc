@@ -109,7 +109,7 @@ func (i *ircListener) OnNickRelayToDiscord(event *irc.Event) {
 		if channelObj, ok := i.Connection.GetChannel(channel); ok {
 			if _, ok := channelObj.GetUser(newNick); ok {
 				msg.IRCChannel = channel
-				i.bridge.discordMessagesChan <- msg
+				i.bridge.irc2discordChan <- msg
 			}
 		}
 	}
@@ -178,11 +178,11 @@ func (i *ircListener) OnJoinQuitCallback(event *irc.Event) {
 				continue
 			}
 			msg.IRCChannel = channel
-			i.bridge.discordMessagesChan <- msg
+			i.bridge.irc2discordChan <- msg
 		}
 	} else {
 		msg.IRCChannel = event.Arguments[0]
-		i.bridge.discordMessagesChan <- msg
+		i.bridge.irc2discordChan <- msg
 	}
 }
 
@@ -297,7 +297,7 @@ func (i *ircListener) OnPrivateMessage(e *irc.Event) {
 	msg = ircf.BlocksToMarkdown(ircf.Parse(msg))
 
 	go func(e *irc.Event) {
-		i.bridge.discordMessagesChan <- IRCMessage{
+		i.bridge.irc2discordChan <- IRCMessage{
 			IRCChannel: e.Arguments[0],
 			Username:   e.Nick,
 			Message:    msg,

@@ -161,10 +161,10 @@ type Bridge struct {
 
 	done chan bool
 
-	discordMessagesChan      chan IRCMessage
-	discordMessageEventsChan chan *DiscordMessage
-	updateUserChan           chan DiscordUser
-	removeUserChan           chan string // user id
+	irc2discordChan       chan IRCMessage
+	discord2ircChan       chan *DiscordMessage
+	discordUpdateUserChan chan DiscordUser
+	discordRemoveUserChan chan string // user id
 
 	emoji map[string]*discordgo.Emoji
 }
@@ -183,10 +183,10 @@ func New(conf *Config) (*Bridge, error) {
 		Config: conf,
 		done:   make(chan bool),
 
-		discordMessagesChan:      make(chan IRCMessage),
-		discordMessageEventsChan: make(chan *DiscordMessage),
-		updateUserChan:           make(chan DiscordUser),
-		removeUserChan:           make(chan string),
+		irc2discordChan:       make(chan IRCMessage),
+		discord2ircChan:       make(chan *DiscordMessage),
+		discordUpdateUserChan: make(chan DiscordUser),
+		discordRemoveUserChan: make(chan string),
 
 		emoji: make(map[string]*discordgo.Emoji),
 	}
@@ -259,7 +259,7 @@ func (b *Bridge) loop() {
 		select {
 
 		// Messages from IRC to Discord
-		case msg := <-b.discordMessagesChan:
+		case msg := <-b.irc2discordChan:
 			mappedDiscordChannel, ok := b.GetMappingByIRC(msg.IRCChannel)
 
 			if !ok {
@@ -351,7 +351,7 @@ func (b *Bridge) loop() {
 			}
 
 		// Messages from Discord to IRC
-		case msg := <-b.discordMessageEventsChan:
+		case msg := <-b.discord2ircChan:
 			mappedIRCChannel, ok := b.GetMappingByDiscord(msg.ChannelID)
 			// Do not do anything if we do not have a mapping for the PUBLIC channel
 			if !ok {

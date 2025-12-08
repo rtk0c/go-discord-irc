@@ -209,7 +209,7 @@ func (d *discordBot) publishMessage(s *discordgo.Session, m *discordgo.Message, 
 		content = spoilerPattern.ReplaceAllString(content, colorCode+"1,1$1"+colorCode)
 	}
 
-	d.bridge.discordMessageEventsChan <- &DiscordMessage{
+	d.bridge.discord2ircChan <- &DiscordMessage{
 		Message:  m,
 		Content:  content,
 		IsAction: isAction,
@@ -219,7 +219,7 @@ func (d *discordBot) publishMessage(s *discordgo.Session, m *discordgo.Message, 
 	pastebinToken := d.bridge.Config.PastebinToken
 	for _, attachment := range m.Attachments {
 		res := reuploadAttachment(pastebinURL, pastebinToken, attachment.URL)
-		d.bridge.discordMessageEventsChan <- &DiscordMessage{
+		d.bridge.discord2ircChan <- &DiscordMessage{
 			Message:  m,
 			Content:  res,
 			IsAction: isAction,
@@ -277,7 +277,7 @@ func (d *discordBot) publishReaction(s *discordgo.Session, r *discordgo.MessageR
 	}
 	content := fmt.Sprint("reacted with ", emoji, reactionTarget)
 
-	d.bridge.discordMessageEventsChan <- &DiscordMessage{
+	d.bridge.discord2ircChan <- &DiscordMessage{
 		Message:  m,
 		Content:  content,
 		IsAction: true,
@@ -419,7 +419,7 @@ func (d *discordBot) sendUpdateUserChan(user DiscordUser) bool {
 		debug.PrintStack()
 	}
 
-	d.bridge.updateUserChan <- user
+	d.bridge.discordUpdateUserChan <- user
 	return true
 }
 
@@ -521,7 +521,7 @@ func (d *discordBot) onMemberUpdate(s *discordgo.Session, m *discordgo.GuildMemb
 
 // onMemberLeave is triggered when a user is removed from a guild (leave/kick/ban).
 func (d *discordBot) onMemberLeave(s *discordgo.Session, m *discordgo.GuildMemberRemove) {
-	d.bridge.removeUserChan <- m.User.ID
+	d.bridge.discordRemoveUserChan <- m.User.ID
 }
 
 // What does this do? Probably what it sounds like.
