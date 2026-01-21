@@ -367,11 +367,11 @@ func (b *Bridge) loop() {
 
 		// Notification to potentially update, or create, a user
 		// We should not receive anything on this channel if we're in Simple Mode
-		// case user := <-b.updateUserChan:
-		// 	b.IRCPuppeteer.HandleUser(user)
+		case user := <-b.discordUpdateUserChan:
+			_ = user // no-op
 
-		// case userID := <-b.removeUserChan:
-		// 	b.IRCPuppeteer.DisconnectUser(userID)
+		case userID := <-b.discordRemoveUserChan:
+			_ = userID // no-op
 
 		// Done!
 		case <-b.done:
