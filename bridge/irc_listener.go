@@ -250,7 +250,7 @@ func (i *ircListener) isPuppetNick(nick string) bool {
 	return false
 }
 
-var discordUsernameMention = regexp.MustCompile(`<@[a-z0-9_.]+>`)
+var discordUsernameMention = regexp.MustCompile(`<@[a-z0-9_.]+(?:/d)?>`)
 
 func (i *ircListener) OnPrivateMessage(e *irc.Event) {
 	// Ignore private messages
@@ -279,7 +279,7 @@ func (i *ircListener) OnPrivateMessage(e *irc.Event) {
 	// There is no reason why they can't do that, especially since every IRC client should support tab completing usernames.
 	// Introducing leniency like case insensitivity here is bad taste.
 	msg := discordUsernameMention.ReplaceAllStringFunc(e.Message(), func(m string) string {
-		username := m[2 : len(m)-1]
+		username := strings.TrimSuffix(m[2:len(m)-1], "/d")
 		userID := d.GetUserID(d.guildID, username)
 		// Didn't find corresponding user, bail out
 		if userID == "" {
