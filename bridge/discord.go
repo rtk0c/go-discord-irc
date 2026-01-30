@@ -227,8 +227,12 @@ func (d *discordBot) publishMessage(s *discordgo.Session, m *discordgo.Message, 
 	}
 
 	// HACK: this is before d.ParseText so that the existing <@uid> translation logic can be used
-	if m.MessageReference != nil && m.MessageReference.ChannelID == m.ChannelID {
+	if m.MessageReference != nil &&
+		m.MessageReference.Type == discordgo.MessageReferenceTypeDefault &&
+		m.MessageReference.ChannelID == m.ChannelID {
+		// Fallback prefix
 		prefix := "[reply]"
+		// If we can fetch the replied-to message, use ideal prefix. Make it look like a mention.
 		msg, err := dstate.ChannelMessage(d.Session, m.MessageReference.ChannelID, m.MessageReference.MessageID)
 		if err == nil {
 			prefix = userToMention(msg.Author) + ":"
@@ -238,6 +242,43 @@ func (d *discordBot) publishMessage(s *discordgo.Session, m *discordgo.Message, 
 			}
 		}
 		m.Content = prefix + " " + m.Content
+	}
+
+	if m.MessageReference != nil &&
+		m.MessageReference.Type == discordgo.MessageReferenceTypeForward {
+		// Fallback prefix
+		var prefix strings.Builder
+		prefix.WriteString("[forwarded]")
+		// If we can fetch the forwarded message, use its source
+		sourceGuild, err := d.Session.State.Guild(m.MessageReference.GuildID)
+		if err == nil {
+			prefix.Reset()
+			prefix.WriteString("forwarded from ")
+			prefix.WriteString(sourceGuild.Name)
+			sourceChannel, err := d.Session.State.Channel(m.MessageReference.ChannelID)
+			if err == nil {
+				prefix.WriteRune(' ')
+				prefix.WriteString(sourceChannel.Name)
+			}
+		}
+
+		prefix.WriteString(":\n")
+
+		// https://discord.com/developers/docs/resources/message#message-snapshot-object
+		// * The current subset of message fields consists of: type, content, embeds, attachments, timestamp, edited_timestamp, flags, mentions, mention_roles, stickers, sticker_items, and components.
+
+		// Copy over all relevant fields from the referenced message
+		lastSnapshot := m.MessageSnapshots[len(m.MessageSnapshots)-1].Message
+		prefix.WriteString(lastSnapshot.Content) // "prefix" is a misnomer at this point, we're using the Builder to construct the whole updated message content.
+		m.Content = prefix.String()
+		m.Embeds = lastSnapshot.Embeds
+		m.Attachments = lastSnapshot.Attachments
+		m.Timestamp = lastSnapshot.Timestamp
+		m.EditedTimestamp = lastSnapshot.EditedTimestamp
+		m.Mentions = lastSnapshot.Mentions
+		m.MentionRoles = lastSnapshot.MentionRoles
+		m.StickerItems = lastSnapshot.StickerItems
+		m.Components = lastSnapshot.Components
 	}
 
 	content := d.ParseText(m)
