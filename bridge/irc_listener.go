@@ -280,17 +280,17 @@ func (i *ircListener) OnPrivateMessage(e *irc.Event) {
 	// Introducing leniency like case insensitivity here is bad taste.
 	msg := discordUsernameMention.ReplaceAllStringFunc(e.Message(), func(m string) string {
 		username := m[2 : len(m)-1]
-		member, err := d.Session.State.Member(d.guildID, username)
-		if err != nil {
+		userID := d.GetUserID(d.guildID, username)
+		// Didn't find corresponding user, bail out
+		if userID == "" {
 			log.WithFields(log.Fields{
 				"ircUser":         e.User,
 				"ircMessage":      e.Message(),
 				"discordUsername": username,
 			}).Warnln("cannot find corresponding discord user with mentioned username")
-			// Bail out, just send the username mention as-is. At minimum, discord users can understand it.
-			return m
+			return username
 		}
-		return "<@" + member.User.ID + ">"
+		return "<@" + userID + ">"
 	})
 
 	if e.Code == "CTCP_ACTION" {
