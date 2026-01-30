@@ -18,28 +18,48 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// NOTE: assumes the bot is session is part of exactly 1 gyukd
 type discordCache struct {
-	// username -> DiscordUser
-	membersCache map[string]*discordgo.Member
+	// guild ID -> username -> *Member object
+	// the cache provided by discordgo is from user ID, which isn't helpful for us handling user mentions.
+	membersCache map[string]map[string]*discordgo.Member
 }
 
-func (dc *discordCache) getMember(userID string) *discordgo.Member {
-	return dc.membersCache[userID]
+func (dc *discordCache) getMember(guildID, userID string) *discordgo.Member {
+	guild, ok := dc.membersCache[guildID]
+	if !ok {
+		return nil
+	}
+	return guild[userID]
 }
 
 func (dc *discordCache) onMemberListChunk(s *discordgo.Session, m *discordgo.GuildMembersChunk) {
-	for _, m := range m.Members {
-		dc.membersCache[m.User.ID] = m
+	guild, ok := dc.membersCache[m.GuildID]
+	if !ok {
+		guild = make(map[string]*discordgo.Member)
+		dc.membersCache[m.GuildID] = guild
+	}
+
+	for _, member := range m.Members {
+		guild[member.User.Username] = member
 	}
 }
 
 func (dc *discordCache) onMemberUpdate(s *discordgo.Session, m *discordgo.GuildMemberUpdate) {
-	dc.membersCache[m.User.ID] = m.Member
+	guild, ok := dc.membersCache[m.GuildID]
+	if !ok {
+		return
+	}
+
+	guild[m.User.Username] = m.Member
 }
 
 func (dc *discordCache) onMemberLeave(s *discordgo.Session, m *discordgo.GuildMemberRemove) {
-	dc.membersCache[m.User.ID] = nil
+	guild, ok := dc.membersCache[m.GuildID]
+	if !ok {
+		return
+	}
+
+	guild[m.User.Username] = nil
 }
 
 type discordBot struct {
@@ -69,7 +89,7 @@ func newDiscord(bridge *Bridge, botToken, guildID string) (*discordBot, error) {
 		guildID: guildID,
 
 		cache: discordCache{
-			membersCache: make(map[string]*discordgo.Member),
+			membersCache: make(map[string]map[string]*discordgo.Member),
 		},
 	}
 	dc := discord.cache
@@ -462,7 +482,7 @@ func (d *discordBot) sendUpdateUserChan(user DiscordUser) bool {
 //
 // See https://github.com/reactiflux/discord-irc/pull/230/files#diff-7202bb7fb017faefd425a2af32df2f9dR357
 func (d *discordBot) GetAvatar(guildID, username string) (_ string) {
-	member := d.cache.getMember(username)
+	member := d.cache.getMember(guildID, username)
 	if member == nil {
 		return
 	}
@@ -471,7 +491,7 @@ func (d *discordBot) GetAvatar(guildID, username string) (_ string) {
 }
 
 func (d *discordBot) GetUserID(guildID, username string) string {
-	member := d.cache.getMember(username)
+	member := d.cache.getMember(guildID, username)
 	if member == nil {
 		return ""
 	}
