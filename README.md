@@ -17,12 +17,17 @@ Inexhaustive change list from upstream:
 
 This branch relies on a tweaked version of go-ircevent that isn't published.
 
-1. Clone this repo, this specific branch to ./go-discord-irc
-2. Clone https://github.com/rtk0c/go-ircevent/tree/ircv3-fixes (that specific branch) to ./go-ircevent
-3. ```
-   cd ./go-discord-irc
-   go build
-   ```
+```
+git clone --recursive https://github.com/rtk0c/go-discord-irc.git
+cd ./go-discord-irc
+
+# either build static binary:
+go build
+# or alternatively, if you want a docker image:
+docker build .
+```
+
+This repo vendors a tweaked version of go-ircevents, using a git submodule, because the upstream version has broken support for IRCv3 cap negociation.
 
 ## Configuration
 

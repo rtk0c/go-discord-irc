@@ -2,7 +2,7 @@ module github.com/qaisjp/go-discord-irc
 
 go 1.18
 
-replace github.com/qaisjp/go-ircevent => ../go-ircevent
+replace github.com/qaisjp/go-ircevent => ./go-ircevent
 
 require (
 	github.com/42wim/matterbridge v1.25.2
