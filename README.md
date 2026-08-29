@@ -45,3 +45,22 @@ This bot needs permissions to manage webhooks as it creates webhooks on the go.
 ```
 https://discordapp.com/oauth2/authorize?&client_id=<YOUR_CLIENT_ID_HERE>&scope=bot&permissions=0x20000000
 ```
+
+## Publishing
+
+Note to self on how to publish:
+
+Follow https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#authenticating-to-the-container-registry
+to login into ghcr in docker.
+
+```
+docker loing
+# This is just a temporary tag shorthand, while building
+docker buildx build --platform=linux/amd64,linux/arm64 -t go-discord-irc .
+docker tag go-discord-irc ghcr.io/rtk0c/go-discord-irc:latest
+docker tag go-discord-irc ghcr.io/rtk0c/go-discord-irc:v1234
+docker push --all-tags ghcr.io/rtk0c/go-discord-irc:latest
+docker image rm go-discord-irc
+```
+
+(where `v1234` is the next version)
