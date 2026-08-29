@@ -148,14 +148,15 @@ func userToMention(u *discordgo.User) (mention string) {
 var spoilerPattern = regexp.MustCompile(`\|\|(.*?)\|\|`)
 var colorCode = string(rune(3))
 
-var cdnDiscordAppURL = regexp.MustCompile(`\d+\/(\d+)\/([^?]+)\?`)
+var cdnDiscordAppURL = regexp.MustCompile(`(\d+)\/(\d+)\/([^?]+)\?`)
 
 func cleanupCdnDiscordAppURL(url string) string {
 	matches := cdnDiscordAppURL.FindStringSubmatch(url)
 	if len(matches) != 3 {
 		return ""
 	}
-	return matches[1] + "-" + matches[2]
+	// guildID-channelID-filename
+	return matches[1] + "-" + matches[2] + "-" + matches[3]
 }
 
 func reuploadAttachment(rustypasteURL, rustypasteToken, sourceURL string) string {
