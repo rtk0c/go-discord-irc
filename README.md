@@ -1,37 +1,28 @@
-# Custom fork for W6YL
+# go-discord-irc — A Custom fork for W6YL
 
 This is a heavily modified fork of the original project, intended for use on the https://irc.w6yl.org network and our Discord guild.
 Use at your own risk.
 
-# go-discord-irc
-
-[![Go Report Card](https://goreportcard.com/badge/github.com/qaisjp/go-discord-irc)](https://goreportcard.com/report/github.com/qaisjp/go-discord-irc)
-[![GoDoc](https://godoc.org/github.com/qaisjp/go-discord-irc?status.svg)](https://godoc.org/github.com/qaisjp/go-discord-irc)
-
-[![Preview](https://i.imgur.com/YpCqzdn.gif)](https://i.imgur.com/YpCqzdn.webm)
-
-**Is this being maintained?** Yes. But I want to merge all this functionality
-into the much superior
-[matterbridge by 42wim](https://github.com/42wim/matterbridge).
-
-This is IRC to Discord bridge was originally built for
-[@compsoc-edinburgh](http://github.com/compsoc-edinburgh) and
-[ImaginaryNet](http://imaginarynet.uk/), but now it looks like more people are
-using it!
+Inexhaustive change list from upstream:
 
 - The `IRC -> Discord` side of things work as you would expect it to: messages
   on IRC send to Discord as the bot user, as per usual.
 - The `Discord -> IRC` side of things work using the IRCv3 `draft/relaymsg` capability to send PRIVMSG with a faked nick (in this case, the discord username)
+- Reupload attachments to some pastebin
+  - Because Discord now adds a timestamped signature to attachment URLs, and they expire. So raw `https://cdn.discordapp.com` links just rot in a few weeks, that's REALLY bad.
+- Support forwarded messages and replies
+- Removed config file reloading support to make the code much simpler (main reason, it was killing me flying all over the place), and binary slightly smaller (might as well)
 
-**Features**
+## Building
 
-(not a full list)
+This branch relies on a tweaked version of go-ircevent that isn't published.
 
-- Every Discord user, like `david`, will appear on IRC as a nick `david/d` (or whatever suffix your IRC server tells the bridge to use).
-- Saying `<@david>` on IRC will mention `david` on Discord
-- Replying to someone on Discord will prefix that someone's name, e.g. replying to Alex with "yes that's fine" will show up as `<david/d> Alex: yes, that's fine` on IRC.
-- IRC users can send (custom!) emoji to Discord, just do `:somename:`. Discord emoji shows up like that on IRC.
-- Reacting to a Discord message will send a CTCP ACTION (`/me`) on IRC.
+1. Clone this repo, this specific branch to ./go-discord-irc
+2. Clone https://github.com/rtk0c/go-ircevent/tree/ircv3-fixes (that specific branch) to ./go-ircevent
+3. ```
+   cd ./go-discord-irc
+   go build
+   ```
 
 ## Configuration
 
@@ -43,11 +34,6 @@ The binary takes three flags:
   false (or not providing this flag) will take the value from the config file
   instead
 - `--debug-presence`: similar to `--debug`, but for Discord user presence information
-
-TODO config file
-
-The specified config file is continuously read from, and many changes will update on the bridge.
-This means you can add or remove channels restarting the bot.
 
 This bot needs permissions to manage webhooks as it creates webhooks on the go.
 
