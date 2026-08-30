@@ -105,7 +105,7 @@ func (i *ircListener) OnNickRelayToDiscord(event *irc.Event) {
 		Message:  fmt.Sprintf("_%s changed their nick to %s_", oldNick, newNick),
 	}
 
-	for channel := range i.bridge.Config.ChannelMappings {
+	for channel := range i.bridge.Config.irc2discord {
 		if channelObj, ok := i.Connection.GetChannel(channel); ok {
 			if _, ok := channelObj.GetUser(newNick); ok {
 				msg.IRCChannel = channel
@@ -168,7 +168,7 @@ func (i *ircListener) OnJoinQuitCallback(event *irc.Event) {
 
 	if event.Code == "STQUIT" {
 		// Notify channels that the user is in
-		for channel := range i.bridge.Config.ChannelMappings {
+		for channel := range i.bridge.Config.irc2discord {
 			channelObj, ok := i.Connection.GetChannel(channel)
 			if !ok {
 				log.WithField("channel", channel).WithField("who", who).Warnln("Trying to process QUIT. Channel not found in irc listener cache.")
@@ -219,7 +219,7 @@ func (i *ircListener) JoinChannels() {
 
 	config := i.bridge.Config
 
-	for channel := range config.ChannelMappings {
+	for channel := range config.irc2discord {
 		key, isKeyed := config.ircChannelKeys[channel]
 
 		if isKeyed {

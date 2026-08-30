@@ -117,8 +117,6 @@ func (m *IRCPuppeteer) SendMessage(channel string, msg *DiscordMessage) {
 	content := msg.Content
 	authorNick := m.generateNickname(msg.Author)
 
-	channel = strings.Split(channel, " ")[0]
-
 	useRelayMsg := m.IsUsingRelayMsg()
 
 	for _, line := range strings.Split(content, "\n") {

@@ -73,6 +73,7 @@ type Config struct {
 	irc2discord     map[string]DiscordChannelInfo
 	// Parsed on load from `ChannelMappings`
 	ircChannelKeys map[string]string // From "#test" to "password"
+	discord2irc    map[string]string // From channel ID to IRC "#test". Note that discord channel ID is globally unique.
 
 	IRCServer     string // Server address to use, example `irc.freenode.net:7000`.
 	IRCServerPass string // Optional password for connecting to the IRC server
@@ -134,10 +135,6 @@ func LoadConfigFile(into *Config, r io.Reader) error {
 		return err
 	}
 
-	if len(into.ChannelMappings) == 0 {
-		log.Warnln("Channel mappings are missing!")
-	}
-
 	return nil
 }
 
@@ -156,7 +153,8 @@ type Bridge struct {
 	discordUpdateUserChan chan DiscordUser
 	discordRemoveUserChan chan string // user id
 
-	emoji map[string]*discordgo.Emoji
+	// Guild ID -> Emoji name -> Emoji object
+	emoji map[string]map[string]*discordgo.Emoji
 }
 
 // Close the Bridge
@@ -168,20 +166,22 @@ func (b *Bridge) Close() {
 // New Bridge
 func New(conf *Config) (*Bridge, error) {
 	// Compute auxiliary information (all private fields) from the primary config (public fields)
-	conf.irc2discord = make(map[string]DiscordChannelInfo)
+	conf.irc2discord = make(map[string]DiscordChannelInfo, len(conf.ChannelMappings))
 	conf.ircChannelKeys = make(map[string]string, len(conf.ChannelMappings))
+	conf.discord2irc = make(map[string]string, len(conf.ChannelMappings))
 
 	guildIDs := make(map[string]bool) // set[string]
 	for irc, discord := range conf.ChannelMappings {
 		// Parse
 
-		ircParts := strings.Split(irc, " ")
-		ircChannel := ircParts[0]
-		ircPassword := ""
-		if parts := len(ircParts); parts < 1 || parts > 2 {
+		ircParts := strings.SplitN(irc, " ", 2)
+		if len(ircParts) == 0 {
 			log.Errorf("Channel mapping (\"%+v\": \"%+v\") is invalid. IRC format: \"<#irc-channel>[ password]\". Ignoring.", irc, discord)
 			continue
-		} else if len(ircParts) == 2 {
+		}
+		ircChannel := ircParts[0]
+		ircPassword := ""
+		if len(ircParts) > 1 {
 			ircPassword = ircParts[1]
 		}
 
@@ -198,6 +198,7 @@ func New(conf *Config) (*Bridge, error) {
 			conf.ircChannelKeys[ircChannel] = ircPassword
 		}
 		conf.irc2discord[ircChannel] = discord
+		conf.discord2irc[discord.channelID] = ircChannel
 		guildIDs[discord.guildID] = true
 	}
 
@@ -213,7 +214,7 @@ func New(conf *Config) (*Bridge, error) {
 		discordUpdateUserChan: make(chan DiscordUser),
 		discordRemoveUserChan: make(chan string),
 
-		emoji: make(map[string]*discordgo.Emoji),
+		emoji: make(map[string]map[string]*discordgo.Emoji),
 	}
 
 	var err error
@@ -255,17 +256,6 @@ func (b *Bridge) Open() (err error) {
 	return
 }
 
-// GetMappingByDiscord returns a Mapping for a given Discord channel.
-// Returns nil if a Mapping does not exist.
-func (b *Bridge) GetMappingByDiscord(channel string) (string, bool) {
-	for ircChannel, discordChannel := range b.Config.ChannelMappings {
-		if discordChannel == channel {
-			return ircChannel, true
-		}
-	}
-	return "", false
-}
-
 var emojiRegex = regexp.MustCompile("(:[a-zA-Z_-]+:)")
 
 func (b *Bridge) loop() {
@@ -276,7 +266,7 @@ func (b *Bridge) loop() {
 		case msg := <-b.irc2discordChan:
 			mappedDiscordChannel, exists := b.Config.irc2discord[msg.IRCChannel]
 			if !exists {
-				log.Warnln("Ignoring message sent from an unhandled IRC channel %+v.", msg.IRCChannel)
+				log.Warnf("Ignoring message sent from an unhandled IRC channel %+v.", msg.IRCChannel)
 				continue
 			}
 
@@ -311,7 +301,7 @@ func (b *Bridge) loop() {
 
 			// Convert any emoji ye?
 			content = emojiRegex.ReplaceAllStringFunc(content, func(emoji string) string {
-				e, ok := b.emoji[strings.ToLower(emoji[1:len(emoji)-1])]
+				e, ok := b.emoji[mappedDiscordChannel.guildID][strings.ToLower(emoji[1:len(emoji)-1])]
 				if !ok {
 					return emoji
 				}
@@ -366,7 +356,7 @@ func (b *Bridge) loop() {
 
 		// Messages from Discord to IRC
 		case msg := <-b.discord2ircChan:
-			mappedIRCChannel, ok := b.GetMappingByDiscord(msg.ChannelID)
+			mappedIRCChannel, ok := b.Config.discord2irc[msg.ChannelID]
 			// Do not do anything if we do not have a mapping for the PUBLIC channel
 			if !ok {
 				continue

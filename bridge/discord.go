@@ -618,18 +618,18 @@ func (d *discordBot) onTypingStart(s *discordgo.Session, m *discordgo.TypingStar
 }
 
 func (d *discordBot) onReady(s *discordgo.Session, m *discordgo.Ready) {
-	guildID := m.Application.GuildID
+	for _, guild := range m.Guilds {
+		// Fires a GuildMembersChunk event
+		err := d.Session.RequestGuildMembers(guild.ID, "", 0, "", true)
+		if err != nil {
+			log.Warningln(errors.Wrap(err, "could not request guild members").Error())
+			return
+		}
 
-	// Fires a GuildMembersChunk event
-	err := d.Session.RequestGuildMembers(guildID, "", 0, "", true)
-	if err != nil {
-		log.Warningln(errors.Wrap(err, "could not request guild members").Error())
-		return
-	}
-
-	emoji, err := d.Session.GuildEmojis(guildID)
-	if err == nil {
-		d.setGuildEmoji(guildID, emoji)
+		emoji, err := d.Session.GuildEmojis(guild.ID)
+		if err == nil {
+			d.setGuildEmoji(guild.ID, emoji)
+		}
 	}
 }
 
@@ -638,9 +638,14 @@ func (d *discordBot) onGuildEmojiUpdate(s *discordgo.Session, m *discordgo.Guild
 }
 
 func (d *discordBot) setGuildEmoji(guild string, emoji []*discordgo.Emoji) {
-	d.bridge.emoji = make(map[string]*discordgo.Emoji)
+	emojiMap, exists := d.bridge.emoji[guild]
+	if !exists {
+		emojiMap = make(map[string]*discordgo.Emoji)
+		d.bridge.emoji[guild] = emojiMap
+	}
+
 	for _, e := range emoji {
-		d.bridge.emoji[strings.ToLower(e.Name)] = e
+		emojiMap[strings.ToLower(e.Name)] = e
 	}
 }
 
