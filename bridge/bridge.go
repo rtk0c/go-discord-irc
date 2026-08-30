@@ -148,7 +148,7 @@ type Bridge struct {
 	discord      *discordBot
 	ircListener  *ircListener
 	IRCPuppeteer *IRCPuppeteer
-	httpServer   *CdnRefresherHttpServer
+	httpServer   *cdnRefresherHttpServer
 
 	done chan bool
 
@@ -233,8 +233,10 @@ func New(conf *Config) (*Bridge, error) {
 		return nil, fmt.Errorf("failed to create IRCPuppeteer: %w", err)
 	}
 
-	dib.httpServer = &CdnRefresherHttpServer{
-		discord: dib.discord.Session,
+	dib.httpServer = &cdnRefresherHttpServer{
+		Discord: dib.discord.Session,
+
+		cache: make(map[string]cdnCache),
 	}
 
 	go dib.loop()
@@ -262,7 +264,7 @@ func (b *Bridge) Open() (err error) {
 	go b.ircListener.Loop()
 
 	if b.Config.CdnLinkRefresherListen != "" {
-		go b.httpServer.start(b.Config.CdnLinkRefresherListen)
+		go b.httpServer.Start(b.Config.CdnLinkRefresherListen)
 	}
 
 	return
