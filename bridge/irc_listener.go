@@ -253,8 +253,9 @@ func (i *ircListener) isPuppetNick(nick string) bool {
 var discordUsernameMention = regexp.MustCompile(`<@[a-z0-9_.]+(?:/d)?>`)
 
 func (i *ircListener) OnPrivateMessage(e *irc.Event) {
+	ircChannel := e.Arguments[0]
 	// Ignore private messages
-	if string(e.Arguments[0][0]) != "#" {
+	if ircChannel[0] != '#' {
 		// If you decide to extend this to respond to PMs, make sure
 		// you do not respond to NOTICEs, see issue #50.
 		return
@@ -280,7 +281,7 @@ func (i *ircListener) OnPrivateMessage(e *irc.Event) {
 	// Introducing leniency like case insensitivity here is bad taste.
 	msg := discordUsernameMention.ReplaceAllStringFunc(e.Message(), func(m string) string {
 		username := strings.TrimSuffix(m[2:len(m)-1], "/d")
-		userID := d.GetUserID(d.guildID, username)
+		userID := d.GetUserID(i.bridge.Config.irc2discord[ircChannel].guildID, username)
 		// Didn't find corresponding user, bail out
 		if userID == "" {
 			log.WithFields(log.Fields{

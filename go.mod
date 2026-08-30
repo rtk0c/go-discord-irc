@@ -1,6 +1,6 @@
 module github.com/qaisjp/go-discord-irc
 
-go 1.18
+go 1.27
 
 replace github.com/qaisjp/go-ircevent => ./go-ircevent
 

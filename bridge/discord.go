@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"iter"
 	"mime/multipart"
 	"net/http"
 	"regexp"
@@ -66,14 +67,13 @@ type discordBot struct {
 	Session *discordgo.Session
 	bridge  *Bridge
 
-	guildID string
-
-	transmitter *transmitter.Transmitter
+	// guild ID to Transmitter object
+	transmitters map[string]*transmitter.Transmitter
 
 	cache discordCache
 }
 
-func newDiscord(bridge *Bridge, botToken, guildID string) (*discordBot, error) {
+func newDiscord(bridge *Bridge, botToken string, guildIDs iter.Seq[string]) (*discordBot, error) {
 
 	// Create a new Discord session using the provided bot token.
 	session, err := discordgo.New("Bot " + botToken)
@@ -86,11 +86,14 @@ func newDiscord(bridge *Bridge, botToken, guildID string) (*discordBot, error) {
 		Session: session,
 		bridge:  bridge,
 
-		guildID: guildID,
+		transmitters: make(map[string]*transmitter.Transmitter),
 
 		cache: discordCache{
 			membersCache: make(map[string]map[string]*discordgo.Member),
 		},
+	}
+	for guildID := range guildIDs {
+		discord.transmitters[guildID] = nil
 	}
 	dc := discord.cache
 
@@ -116,10 +119,14 @@ func newDiscord(bridge *Bridge, botToken, guildID string) (*discordBot, error) {
 }
 
 func (d *discordBot) Open() error {
-	d.transmitter = transmitter.New(d.Session, d.guildID, "irc-bridge", true)
-	d.transmitter.Log = log.NewEntry(log.StandardLogger())
-	if err := d.transmitter.RefreshGuildWebhooks(nil); err != nil {
-		return fmt.Errorf("failed to refresh guild webhooks: %w", err)
+	for guildID := range d.transmitters {
+		transmitter := transmitter.New(d.Session, guildID, "irc-bridge", true)
+		transmitter.Log = log.NewEntry(log.StandardLogger())
+		if err := transmitter.RefreshGuildWebhooks(nil); err != nil {
+			return fmt.Errorf("failed to refresh guild webhooks: %w", err)
+		}
+
+		d.transmitters[guildID] = transmitter
 	}
 
 	d.Session.Identify.Intents = discordgo.MakeIntent(discordgo.IntentsAll)
@@ -214,8 +221,10 @@ func (d *discordBot) publishMessage(s *discordgo.Session, m *discordgo.Message, 
 		return
 	}
 
+	transmitter := d.transmitters[m.GuildID]
+
 	// Ignore messages sent from our webhooks
-	if d.transmitter.HasWebhook(m.Author.ID) {
+	if transmitter.HasWebhook(m.Author.ID) {
 		return
 	}
 
@@ -413,7 +422,7 @@ func (d *discordBot) ParseText(m *discordgo.Message) string {
 
 	// Copied from message.go ContentWithMoreMentionsReplaced(s)
 	for _, roleID := range m.MentionRoles {
-		role, err := d.Session.State.Role(d.guildID, roleID)
+		role, err := d.Session.State.Role(m.GuildID, roleID)
 		if err != nil || !role.Mentionable {
 			continue
 		}
@@ -472,7 +481,7 @@ func (d *discordBot) ParseText(m *discordgo.Message) string {
 	return content
 }
 
-func (d *discordBot) handlePresenceUpdate(uid string, status discordgo.Status, forceOnline bool) {
+func (d *discordBot) handlePresenceUpdate(guildID string, uid string, status discordgo.Status, forceOnline bool) {
 	// If they are offline, just deliver a mostly empty struct with the ID and online state
 	if !forceOnline && !isStatusOnline(status) {
 		if d.bridge.Config.DebugPresence {
@@ -490,7 +499,7 @@ func (d *discordBot) handlePresenceUpdate(uid string, status discordgo.Status, f
 	}
 
 	// Otherwise get their GuildMember object...
-	user, err := d.Session.State.Member(d.guildID, uid)
+	user, err := d.Session.State.Member(guildID, uid)
 	if err != nil {
 		log.Println(errors.Wrap(err, "get member from state in handlePresenceUpdate failed"))
 		return
@@ -591,13 +600,13 @@ func (d *discordBot) onPresencesReplace(s *discordgo.Session, m *discordgo.Prese
 
 // Handle when presence is updated
 func (d *discordBot) onPresenceUpdate(s *discordgo.Session, m *discordgo.PresenceUpdate) {
-	d.handlePresenceUpdate(m.Presence.User.ID, m.Presence.Status, false)
+	d.handlePresenceUpdate(m.GuildID, m.Presence.User.ID, m.Presence.Status, false)
 }
 
 func (d *discordBot) onTypingStart(s *discordgo.Session, m *discordgo.TypingStart) {
 	status := discordgo.StatusOffline
 
-	p, err := d.Session.State.Presence(d.guildID, m.UserID)
+	p, err := d.Session.State.Presence(m.GuildID, m.UserID)
 	if err != nil {
 		log.Println(errors.Wrap(err, "get presence from in onTypingStart failed"))
 		// return
@@ -606,20 +615,22 @@ func (d *discordBot) onTypingStart(s *discordgo.Session, m *discordgo.TypingStar
 	}
 
 	// .. and handle as per usual
-	d.handlePresenceUpdate(m.UserID, status, true)
+	d.handlePresenceUpdate(m.GuildID, m.UserID, status, true)
 }
 
 func (d *discordBot) onReady(s *discordgo.Session, m *discordgo.Ready) {
+	guildID := m.Application.GuildID
+
 	// Fires a GuildMembersChunk event
-	err := d.Session.RequestGuildMembers(d.guildID, "", 0, "", true)
+	err := d.Session.RequestGuildMembers(guildID, "", 0, "", true)
 	if err != nil {
 		log.Warningln(errors.Wrap(err, "could not request guild members").Error())
 		return
 	}
 
-	emoji, err := d.Session.GuildEmojis(d.guildID)
+	emoji, err := d.Session.GuildEmojis(guildID)
 	if err == nil {
-		d.setGuildEmoji(d.guildID, emoji)
+		d.setGuildEmoji(guildID, emoji)
 	}
 }
 
@@ -638,7 +649,7 @@ func (d *discordBot) handleMemberUpdate(m *discordgo.Member, forceOnline bool) {
 	status := discordgo.StatusOnline
 
 	if !forceOnline {
-		presence, err := d.Session.State.Presence(d.guildID, m.User.ID)
+		presence, err := d.Session.State.Presence(m.GuildID, m.User.ID)
 		if err != nil {
 			// This error is usually triggered on first run because it represents offline
 			if err != discordgo.ErrStateNotFound {

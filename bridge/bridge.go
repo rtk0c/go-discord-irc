@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"regexp"
 	"strings"
 
@@ -55,6 +56,10 @@ func (s JsonGlob) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+type DiscordChannelInfo struct {
+	guildID, channelID string
+}
+
 // Config to be passed to New
 type Config struct {
 	AvatarURL       string
@@ -62,7 +67,10 @@ type Config struct {
 	GuildID         string // Guild to/from which to bridge messages
 
 	// Map from Discord to IRC
+	// Input format: "<#irc-channel> [password]": "<guild ID>-<channel ID>"
+	// Discarded after initial parse. Use fields below which is constructed from this for lookup:
 	ChannelMappings map[string]string
+	irc2discord     map[string]DiscordChannelInfo
 	// Parsed on load from `ChannelMappings`
 	ircChannelKeys map[string]string // From "#test" to "password"
 
@@ -133,24 +141,6 @@ func LoadConfigFile(into *Config, r io.Reader) error {
 	return nil
 }
 
-// Compute auxiliary information (all private fields) from the primary config (public fields)
-func resolveConfigAux(config *Config) {
-	mappings := config.ChannelMappings
-
-	config.ircChannelKeys = make(map[string]string, len(mappings))
-
-	for irc, discord := range mappings {
-		ircParts := strings.Split(irc, " ")
-		ircChannel := ircParts[0]
-		if parts := len(ircParts); parts != 1 && parts > 2 {
-			log.Errorf("IRC channel irc %+v (to discord %+v) is invalid. Expected 0 or 1 spaces in the string. Ignoring.", irc, discord)
-			continue
-		} else if parts == 2 {
-			config.ircChannelKeys[ircChannel] = ircParts[1]
-		}
-	}
-}
-
 // A Bridge represents a bridging between an IRC server and channels in a Discord server
 type Bridge struct {
 	Config *Config
@@ -177,7 +167,42 @@ func (b *Bridge) Close() {
 
 // New Bridge
 func New(conf *Config) (*Bridge, error) {
-	resolveConfigAux(conf)
+	// Compute auxiliary information (all private fields) from the primary config (public fields)
+	conf.irc2discord = make(map[string]DiscordChannelInfo)
+	conf.ircChannelKeys = make(map[string]string, len(conf.ChannelMappings))
+
+	guildIDs := make(map[string]bool) // set[string]
+	for irc, discord := range conf.ChannelMappings {
+		// Parse
+
+		ircParts := strings.Split(irc, " ")
+		ircChannel := ircParts[0]
+		ircPassword := ""
+		if parts := len(ircParts); parts < 1 || parts > 2 {
+			log.Errorf("Channel mapping (\"%+v\": \"%+v\") is invalid. IRC format: \"<#irc-channel>[ password]\". Ignoring.", irc, discord)
+			continue
+		} else if len(ircParts) == 2 {
+			ircPassword = ircParts[1]
+		}
+
+		discordParts := strings.SplitN(discord, "/", 2)
+		if len(discordParts) != 2 {
+			log.Errorf("Channel mapping (\"%+v\": \"%+v\") is invalid. Discord format: \"<guild ID> <channel ID>\". Ignoring.", irc, discord)
+			continue
+		}
+		discord := DiscordChannelInfo{discordParts[0], discordParts[1]}
+
+		// Populate
+
+		if ircPassword != "" {
+			conf.ircChannelKeys[ircChannel] = ircPassword
+		}
+		conf.irc2discord[ircChannel] = discord
+		guildIDs[discord.guildID] = true
+	}
+
+	// Throw away input, not needed anymore
+	conf.ChannelMappings = nil
 
 	dib := &Bridge{
 		Config: conf,
@@ -193,7 +218,7 @@ func New(conf *Config) (*Bridge, error) {
 
 	var err error
 
-	dib.discord, err = newDiscord(dib, conf.DiscordBotToken, conf.GuildID)
+	dib.discord, err = newDiscord(dib, conf.DiscordBotToken, maps.Keys(guildIDs))
 	if err != nil {
 		return nil, errors.Wrap(err, "Could not create discord bot")
 	}
@@ -230,17 +255,6 @@ func (b *Bridge) Open() (err error) {
 	return
 }
 
-// GetMappingByIRC returns a Mapping for a given IRC channel.
-// Returns nil if a Mapping does not exist.
-func (b *Bridge) GetMappingByIRC(channel string) (string, bool) {
-	for ircChannel, discordChannel := range b.Config.ChannelMappings {
-		if strings.EqualFold(ircChannel, channel) {
-			return discordChannel, true
-		}
-	}
-	return "", false
-}
-
 // GetMappingByDiscord returns a Mapping for a given Discord channel.
 // Returns nil if a Mapping does not exist.
 func (b *Bridge) GetMappingByDiscord(channel string) (string, bool) {
@@ -260,10 +274,9 @@ func (b *Bridge) loop() {
 
 		// Messages from IRC to Discord
 		case msg := <-b.irc2discordChan:
-			mappedDiscordChannel, ok := b.GetMappingByIRC(msg.IRCChannel)
-
-			if !ok {
-				log.Warnln("Ignoring message sent from an unhandled IRC channel.")
+			mappedDiscordChannel, exists := b.Config.irc2discord[msg.IRCChannel]
+			if !exists {
+				log.Warnln("Ignoring message sent from an unhandled IRC channel %+v.", msg.IRCChannel)
 				continue
 			}
 
@@ -313,17 +326,18 @@ func (b *Bridge) loop() {
 
 			if username == "" {
 				// System messages come straight from the bot
-				if _, err := b.discord.Session.ChannelMessageSend(mappedDiscordChannel, content); err != nil {
+				if _, err := b.discord.Session.ChannelMessageSend(mappedDiscordChannel.channelID, content); err != nil {
 					log.WithError(err).WithFields(log.Fields{
-						"msg.channel":  mappedDiscordChannel,
+						"msg.channel":  mappedDiscordChannel.channelID,
 						"msg.username": username,
 						"msg.content":  content,
 					}).Errorln("could not transmit SYSTEM message to discord")
 				}
 			} else {
 				go func() {
-					_, err := b.discord.transmitter.Send(
-						mappedDiscordChannel,
+					transmitter := b.discord.transmitters[mappedDiscordChannel.guildID]
+					_, err := transmitter.Send(
+						mappedDiscordChannel.channelID,
 						&discordgo.WebhookParams{
 							Username:  username,
 							AvatarURL: avatar,
