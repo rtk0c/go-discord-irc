@@ -112,6 +112,9 @@ type Config struct {
 	// TODO respect this value
 	MaxNickLength int
 
+	// If specified, create a HTTP server at this address returning the refreshed CDN links.
+	CdnLinkRefresherListen string
+
 	PastebinURL   string
 	PastebinToken string
 
@@ -145,6 +148,7 @@ type Bridge struct {
 	discord      *discordBot
 	ircListener  *ircListener
 	IRCPuppeteer *IRCPuppeteer
+	httpServer   *CdnRefresherHttpServer
 
 	done chan bool
 
@@ -229,6 +233,10 @@ func New(conf *Config) (*Bridge, error) {
 		return nil, fmt.Errorf("failed to create IRCPuppeteer: %w", err)
 	}
 
+	dib.httpServer = &CdnRefresherHttpServer{
+		discordBotToken: conf.DiscordBotToken,
+	}
+
 	go dib.loop()
 
 	return dib, nil
@@ -252,6 +260,10 @@ func (b *Bridge) Open() (err error) {
 
 	// run listener loop
 	go b.ircListener.Loop()
+
+	if b.Config.CdnLinkRefresherListen != "" {
+		go b.httpServer.start(b.Config.CdnLinkRefresherListen)
+	}
 
 	return
 }
