@@ -103,7 +103,7 @@ func newDiscord(bridge *Bridge, botToken, guildID string) (*discordBot, error) {
 	discord.Session.AddHandler(discord.onMemberListChunk)
 	discord.Session.AddHandler(discord.onMemberUpdate)
 	discord.Session.AddHandler(discord.onMemberLeave)
-	discord.Session.AddHandler(discord.onPresencesReplace)
+	// discord.Session.AddHandler(discord.onPresencesReplace)
 	discord.Session.AddHandler(discord.onPresenceUpdate)
 	discord.Session.AddHandler(discord.onTypingStart)
 	discord.Session.AddHandler(discord.onMessageReactionAdd)
@@ -578,12 +578,16 @@ func (d *discordBot) onMemberLeave(s *discordgo.Session, m *discordgo.GuildMembe
 	d.bridge.discordRemoveUserChan <- m.User.ID
 }
 
+// NOTE(rtk0c): I believe this event has been removed in recent Discord. I searched API docs and discord.py and didn't find anything.
+// The only event relevant is the "presence update" event.
+/*
 // What does this do? Probably what it sounds like.
 func (d *discordBot) onPresencesReplace(s *discordgo.Session, m *discordgo.PresencesReplace) {
 	for _, p := range *m {
 		d.handlePresenceUpdate(p.User.ID, p.Status, false)
 	}
 }
+*/
 
 // Handle when presence is updated
 func (d *discordBot) onPresenceUpdate(s *discordgo.Session, m *discordgo.PresenceUpdate) {
