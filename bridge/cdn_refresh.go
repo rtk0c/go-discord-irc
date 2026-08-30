@@ -18,7 +18,7 @@ import (
 
 type cdnCache struct {
 	expiresAt time.Time
-	params    string // ex=_&is=_&hm=_ // note this is without the leading ?
+	url       string
 }
 
 type cdnRefresherHttpServer struct {
@@ -93,7 +93,7 @@ func (s *cdnRefresherHttpServer) handleRefreshLink(w http.ResponseWriter, req *h
 	if exists {
 		if time.Now().Before(cacheEntry.expiresAt) {
 			httpCacheControl(w, cacheEntry.expiresAt)
-			http.Redirect(w, req, cdnLink+"?"+cacheEntry.params, http.StatusTemporaryRedirect)
+			http.Redirect(w, req, cacheEntry.url, http.StatusTemporaryRedirect)
 			return
 		} else {
 			// Concurrency: it is safe to delete() a non-existent two, ok if two goroutines got the same expired cache entry
@@ -139,7 +139,7 @@ func (s *cdnRefresherHttpServer) handleRefreshLink(w http.ResponseWriter, req *h
 			s.cacheLock.Lock()
 			s.cache[cdnLink] = cdnCache{
 				expiresAt: expiresAt,
-				params:    refreshedUrl.RawQuery,
+				url:       refreshedLink,
 			}
 			s.cacheLock.Unlock()
 
