@@ -10,8 +10,17 @@ Inexhaustive change list from upstream:
 - The `Discord -> IRC` side of things work using the IRCv3 `draft/relaymsg` capability to send PRIVMSG with a faked nick (in this case, the discord username)
 - Reupload attachments to some pastebin
   - Because Discord now adds a timestamped signature to attachment URLs, and they expire. So raw `https://cdn.discordapp.com` links just rot in a few weeks, that's REALLY bad.
+  - **NOTE** the HTTP interface is kind of hard coded to Rustypaste right now because that's what I use...
 - Support forwarded messages and replies
 - Removed config file reloading support to make the code much simpler (main reason, it was killing me flying all over the place), and binary slightly smaller (might as well)
+
+> 🔔 You might know that https://github.com/42wim/matterbridge also supports `draft/relaymsg`.
+> The unfortunate matter of fact is that when I found out about it, I've already spent lots of time rewriting this the upstream project to fit my needs, so it ended in like a sunken cost scenario.
+>
+> This bridge does have a few more additional features that matterbridge doesn't, namely:
+> - Reupload attachments to some pastebin
+> - Sending avatars from a configurable source like `https://github.com/${USERNAME}.png` when an identically named user doesn't exist on Discord (it supports checking for identical user, using the `UseLocalAvatar` option, but not the first part)
+> - Forwarded message support
 
 ## Building
 
