@@ -64,3 +64,10 @@ docker image rm go-discord-irc
 ```
 
 (where `v1234` is the next version)
+
+
+# Note on the design
+
+Discord channel ID and guild ID are globally unique. The config could have only asked for channel ID and fetched the corresponding guild ID from the list of guilds the discord application ("bot") was invited to. But, I believe specifying both in config is more explicit and less "magic".
+
+Note that there is no way check that you gave a valid guildID/channelID pair. If they're mismatched, the bridge will just panic.
