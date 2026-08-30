@@ -331,10 +331,15 @@ func (d *discordBot) publishMessage(s *discordgo.Session, m *discordgo.Message, 
 	pastebinURL := d.bridge.Config.PastebinURL
 	pastebinToken := d.bridge.Config.PastebinToken
 	for _, attachment := range m.Attachments {
-		res := reuploadAttachment(pastebinURL, pastebinToken, attachment.URL)
+		var content string
+		if pastebinURL != "" {
+			content = reuploadAttachment(pastebinURL, pastebinToken, attachment.URL)
+		} else {
+			content = attachment.URL
+		}
 		d.bridge.discord2ircChan <- &DiscordMessage{
 			Message:  m,
-			Content:  res,
+			Content:  content,
 			IsAction: isAction,
 		}
 	}
