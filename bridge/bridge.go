@@ -114,9 +114,14 @@ type Config struct {
 
 	// If specified, create a HTTP server at this address returning the refreshed CDN links.
 	CdnLinkRefresherListen string
+	// If set, send attachments by prefixing this. (highest priority)
+	CdnLinkPrefix string
 
+	// If set, reupload attachments to this. (lower priority)
 	PastebinURL   string
 	PastebinToken string
+
+	// Otherwise, send attachments URL as-is
 
 	Debug         bool
 	DebugPresence bool

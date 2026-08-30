@@ -328,11 +328,14 @@ func (d *discordBot) publishMessage(s *discordgo.Session, m *discordgo.Message, 
 		IsAction: isAction,
 	}
 
+	prefix := d.bridge.Config.CdnLinkPrefix
 	pastebinURL := d.bridge.Config.PastebinURL
 	pastebinToken := d.bridge.Config.PastebinToken
 	for _, attachment := range m.Attachments {
 		var content string
-		if pastebinURL != "" {
+		if prefix != "" {
+			content = prefix + attachment.URL
+		} else if pastebinURL != "" {
 			content = reuploadAttachment(pastebinURL, pastebinToken, attachment.URL)
 		} else {
 			content = attachment.URL
