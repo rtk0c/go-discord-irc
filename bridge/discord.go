@@ -162,14 +162,14 @@ func userToMention(u *discordgo.User) (mention string) {
 var spoilerPattern = regexp.MustCompile(`\|\|(.*?)\|\|`)
 var colorCode = string(rune(3))
 
+// channelID/messageID/filename
 var cdnDiscordAppURL = regexp.MustCompile(`(\d+)\/(\d+)\/([^?]+)\?`)
 
 func cleanupCdnDiscordAppURL(url string) string {
 	matches := cdnDiscordAppURL.FindStringSubmatch(url)
-	if len(matches) != 3 {
+	if len(matches) != 1+3 {
 		return ""
 	}
-	// guildID-channelID-filename
 	return matches[1] + "-" + matches[2] + "-" + matches[3]
 }
 
