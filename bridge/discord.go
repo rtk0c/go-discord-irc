@@ -121,7 +121,6 @@ func newDiscord(bridge *Bridge, botToken string, guildIDs iter.Seq[string]) (*di
 func (d *discordBot) Open() error {
 	for guildID := range d.transmitters {
 		transmitter := transmitter.New(d.Session, guildID, "irc-bridge", true)
-		transmitter.Log = log.NewEntry(log.StandardLogger())
 		if err := transmitter.RefreshGuildWebhooks(nil); err != nil {
 			return fmt.Errorf("failed to refresh guild webhooks: %w", err)
 		}
