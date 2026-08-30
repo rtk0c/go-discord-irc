@@ -234,7 +234,7 @@ func New(conf *Config) (*Bridge, error) {
 	}
 
 	dib.httpServer = &CdnRefresherHttpServer{
-		discordBotToken: conf.DiscordBotToken,
+		discord: dib.discord.Session,
 	}
 
 	go dib.loop()

@@ -1,21 +1,19 @@
 package bridge
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/bwmarrin/discordgo"
 )
 
 type CdnRefresherHttpServer struct {
-	discordBotToken string
+	discord *discordgo.Session
 }
 
 type DiscordApiRefreshLinksResponse struct {
@@ -25,46 +23,23 @@ type DiscordApiRefreshLinksResponse struct {
 	} `json:"refreshed_urls"`
 }
 
-func apiRequestRefreshLinks(discordToken string, cdnLinks []string) *DiscordApiRefreshLinksResponse {
+const DiscordApiRefreshUrlsEndpoint = "https://discord.com/api/v10/attachments/refresh-urls"
+
+func (s CdnRefresherHttpServer) apiRequestRefreshLinks(cdnLinks []string) (st DiscordApiRefreshLinksResponse, err error) {
 	var requestBody = map[string]interface{}{
 		"attachment_urls": cdnLinks,
 	}
-	jsonValue, _ := json.Marshal(requestBody)
-
-	req, err := http.NewRequest(http.MethodPost, "https://discord.com/api/v10/attachments/refresh-urls", bytes.NewBuffer(jsonValue))
-	jsonValue = nil // bytes.NewBuffer contract(), don't touch it
+	response, err := s.discord.RequestWithBucketID("GET", DiscordApiRefreshUrlsEndpoint, requestBody, DiscordApiRefreshUrlsEndpoint)
 	if err != nil {
-		log.Errorln(err)
-		return nil
+		return
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bot "+discordToken)
 
-	httpResponse, err := http.DefaultClient.Do(req)
+	err = json.Unmarshal(response, &st)
 	if err != nil {
-		log.Errorln(err)
-		return nil
-	}
-	defer httpResponse.Body.Close()
-
-	respBody, err := io.ReadAll(httpResponse.Body)
-	if err != nil {
-		log.Errorln(err)
-		return nil
+		return
 	}
 
-	if httpResponse.StatusCode != http.StatusOK {
-		log.Errorln("rustypatse upload failed", httpResponse.Status, respBody)
-		return nil
-	}
-
-	var resp DiscordApiRefreshLinksResponse
-	if err := json.Unmarshal(respBody, &resp); err != nil {
-		log.Errorln(err)
-		return nil
-	}
-
-	return &resp
+	return
 }
 
 func (s CdnRefresherHttpServer) handleRefreshLink(w http.ResponseWriter, req *http.Request) {
@@ -73,8 +48,8 @@ func (s CdnRefresherHttpServer) handleRefreshLink(w http.ResponseWriter, req *ht
 		return
 	}
 
-	res := apiRequestRefreshLinks(s.discordBotToken, []string{req.URL.Path})
-	if res == nil {
+	res, err := s.apiRequestRefreshLinks([]string{req.URL.Path})
+	if err != nil {
 		http.Error(w, "Discord API error", http.StatusBadGateway)
 		return
 	}
