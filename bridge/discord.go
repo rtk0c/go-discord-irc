@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/42wim/matterbridge/bridge/discord/transmitter"
-	"github.com/qaisjp/go-discord-irc/dstate"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/pkg/errors"
@@ -61,6 +60,15 @@ func (dc *discordCache) onMemberLeave(s *discordgo.Session, m *discordgo.GuildMe
 	}
 
 	guild[m.User.Username] = nil
+}
+
+// first tries the State to reuse cache, and then falls back on an endpoint request.
+func discordChannelMessage(s *discordgo.Session, channelID string, messageID string) (*discordgo.Message, error) {
+	if msg, err := s.State.Message(channelID, messageID); err == nil {
+		return msg, err
+	}
+
+	return s.ChannelMessage(channelID, messageID)
 }
 
 type discordBot struct {
@@ -242,7 +250,7 @@ func (d *discordBot) publishMessage(s *discordgo.Session, m *discordgo.Message, 
 		// Fallback prefix
 		prefix := "[reply]"
 		// If we can fetch the replied-to message, use ideal prefix. Make it look like a mention.
-		msg, err := dstate.ChannelMessage(d.Session, m.MessageReference.ChannelID, m.MessageReference.MessageID)
+		msg, err := discordChannelMessage(d.Session, m.MessageReference.ChannelID, m.MessageReference.MessageID)
 		if err == nil {
 			prefix = userToMention(msg.Author) + ":"
 			if !msg.Author.Bot {
@@ -350,7 +358,7 @@ func (d *discordBot) publishReaction(s *discordgo.Session, r *discordgo.MessageR
 		GuildID:   r.GuildID,
 	}
 
-	originalMessage, err := dstate.ChannelMessage(d.Session, r.ChannelID, r.MessageID)
+	originalMessage, err := discordChannelMessage(d.Session, r.ChannelID, r.MessageID)
 	reactionTarget := ""
 	if err == nil {
 		// TODO 1: could add extra logic to figure out what length is needed to disambiguate
@@ -450,9 +458,10 @@ func (d *discordBot) ParseText(m *discordgo.Message) string {
 		channelID := str[2 : len(str)-1]
 
 		channel, err := d.Session.State.Channel(channelID)
-		if err == nil {
+		switch err {
+		case nil:
 			return "#" + channel.Name
-		} else if err == discordgo.ErrStateNotFound {
+		case discordgo.ErrStateNotFound:
 			return "#deleted-channel"
 		}
 
@@ -465,9 +474,10 @@ func (d *discordBot) ParseText(m *discordgo.Message) string {
 		roleID := str[3 : len(str)-1]
 
 		role, err := d.Session.State.Role(d.bridge.Config.GuildID, roleID)
-		if err == nil {
+		switch err {
+		case nil:
 			return "@" + role.Name
-		} else if err == discordgo.ErrStateNotFound {
+		case discordgo.ErrStateNotFound:
 			return "@deleted-role"
 		}
 
