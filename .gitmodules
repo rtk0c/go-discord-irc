@@ -1,4 +1,4 @@
 [submodule "go-ircevent"]
 	path = go-ircevent
-	url = git@github.com:rtk0c/go-ircevent.git
-	branch = ircv3-fixes
+	url = git@github.com:W6YL/go-ircevent.git
+	branch = w6yl-custom
